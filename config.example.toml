@@ -1,0 +1,55 @@
+log_level = "INFO"
+default_vm_id = "100"
+default_snapshot = "clean"
+
+[vm_provider]
+type = "proxmox"
+
+[vm_provider.settings]
+host = "192.168.1.10"
+port = 8006
+user = "root@pam"
+token_name = "detonator"
+token_value = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+verify_ssl = false
+node = "pve"
+
+[storage]
+data_dir = "data"
+db_path = "data/detonator.db"
+
+[agent]
+port = 8000
+health_timeout_sec = 60
+health_poll_sec = 2
+
+[timeouts]
+provision_sec = 120
+preflight_sec = 30
+detonate_sec = 120
+collect_sec = 60
+enrich_sec = 120
+
+[egress.direct]
+type = "direct"
+
+[egress.direct.settings]
+bridge = "vmbr1"
+gateway = "192.168.1.1"
+
+[egress.vpn]
+type = "vpn"
+
+[egress.vpn.settings]
+bridge = "vmbr2"
+wg_interface = "wg0"
+wg_config = "/etc/wireguard/detonator.conf"
+
+[egress.tether]
+type = "tether"
+
+[egress.tether.settings]
+bridge = "vmbr3"
+usb_interface = "usb0"
+
+enrichment_modules = ["whois", "dns", "tls", "favicon"]
