@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from detonator.orchestrator.agent_client import AgentClient
+from detonator.orchestrator.agent_manager import AgentManager
 
 
 def _mock_transport(handler):
@@ -19,11 +19,11 @@ async def test_health_ok():
         assert request.url.path == "/health"
         return httpx.Response(200, json={"status": "ok", "browser": "playwright_chromium"})
 
-    async with AgentClient("http://vm:8000") as client:
-        client._client = httpx.AsyncClient(
+    async with AgentManager("http://vm:8000") as manager:
+        manager._client = httpx.AsyncClient(
             base_url="http://vm:8000", transport=_mock_transport(handler)
         )
-        health = await client.health()
+        health = await manager.health()
         assert health.status == "ok"
         assert health.browser == "playwright_chromium"
 
@@ -37,11 +37,11 @@ async def test_wait_for_health_succeeds_after_retries():
             raise httpx.ConnectError("not ready")
         return httpx.Response(200, json={"status": "ok"})
 
-    async with AgentClient("http://vm:8000") as client:
-        client._client = httpx.AsyncClient(
+    async with AgentManager("http://vm:8000") as manager:
+        manager._client = httpx.AsyncClient(
             base_url="http://vm:8000", transport=_mock_transport(handler)
         )
-        health = await client.wait_for_health(timeout_sec=5, poll_sec=0.01)
+        health = await manager.wait_for_health(timeout_sec=5, poll_sec=0.01)
         assert health.status == "ok"
         assert calls["n"] == 3
 
@@ -50,12 +50,12 @@ async def test_wait_for_health_timeout():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("never ready")
 
-    async with AgentClient("http://vm:8000") as client:
-        client._client = httpx.AsyncClient(
+    async with AgentManager("http://vm:8000") as manager:
+        manager._client = httpx.AsyncClient(
             base_url="http://vm:8000", transport=_mock_transport(handler)
         )
         with pytest.raises(TimeoutError):
-            await client.wait_for_health(timeout_sec=0.05, poll_sec=0.01)
+            await manager.wait_for_health(timeout_sec=0.05, poll_sec=0.01)
 
 
 async def test_detonate_posts_payload():
@@ -68,11 +68,11 @@ async def test_detonate_posts_payload():
         captured.update(_json.loads(request.content))
         return httpx.Response(200, json={"state": "running"})
 
-    async with AgentClient("http://vm:8000") as client:
-        client._client = httpx.AsyncClient(
+    async with AgentManager("http://vm:8000") as manager:
+        manager._client = httpx.AsyncClient(
             base_url="http://vm:8000", transport=_mock_transport(handler)
         )
-        status = await client.detonate(
+        status = await manager.detonate(
             "https://example.com", timeout_sec=42, interactive=True
         )
         assert status.state == "running"
@@ -87,11 +87,11 @@ async def test_wait_for_terminal_transitions_to_complete():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"state": next(states)})
 
-    async with AgentClient("http://vm:8000") as client:
-        client._client = httpx.AsyncClient(
+    async with AgentManager("http://vm:8000") as manager:
+        manager._client = httpx.AsyncClient(
             base_url="http://vm:8000", transport=_mock_transport(handler)
         )
-        final = await client.wait_for_terminal(timeout_sec=5, poll_sec=0.01)
+        final = await manager.wait_for_terminal(timeout_sec=5, poll_sec=0.01)
         assert final.state == "complete"
 
 
@@ -101,11 +101,11 @@ async def test_wait_for_terminal_pauses_on_interactive():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"state": next(states)})
 
-    async with AgentClient("http://vm:8000") as client:
-        client._client = httpx.AsyncClient(
+    async with AgentManager("http://vm:8000") as manager:
+        manager._client = httpx.AsyncClient(
             base_url="http://vm:8000", transport=_mock_transport(handler)
         )
-        final = await client.wait_for_terminal(
+        final = await manager.wait_for_terminal(
             timeout_sec=5, poll_sec=0.01, pause_on_interactive=True
         )
         assert final.state == "paused"
@@ -126,11 +126,11 @@ async def test_download_all_writes_files(tmp_path: Path):
             return httpx.Response(200, content=files[name])
         return httpx.Response(404)
 
-    async with AgentClient("http://vm:8000") as client:
-        client._client = httpx.AsyncClient(
+    async with AgentManager("http://vm:8000") as manager:
+        manager._client = httpx.AsyncClient(
             base_url="http://vm:8000", transport=_mock_transport(handler)
         )
-        results = await client.download_all(tmp_path)
+        results = await manager.download_all(tmp_path)
 
     assert len(results) == 3
     for name, content in files.items():

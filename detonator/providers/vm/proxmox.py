@@ -105,9 +105,10 @@ class ProxmoxProvider(VMProvider):
             await self._wait_for_state(vm_id, VMState.STOPPED)
 
         logger.info("Reverting VM %s to snapshot %s", vm_id, snapshot_id)
-        await asyncio.to_thread(
+        upid: str = await asyncio.to_thread(
             self._qemu()(vm_id).snapshot(snapshot_id).rollback.post
         )
+        await self._wait_for_task(upid)
 
     async def start(self, vm_id: str) -> None:
         logger.info("Starting VM %s", vm_id)
@@ -174,3 +175,29 @@ class ProxmoxProvider(VMProvider):
         raise TimeoutError(
             f"VM {vm_id} did not reach state {target} within {timeout}s"
         )
+
+    async def _wait_for_task(
+        self, upid: str, *, timeout: float = 60, poll: float = 1
+    ) -> None:
+        """Poll a Proxmox task until it exits, then raise if it did not succeed.
+
+        Proxmox returns a UPID (Unique Process ID) string for async operations
+        such as snapshot rollbacks.  The task must reach ``status == "stopped"``
+        before the caller proceeds; otherwise the VM remains locked and
+        subsequent API calls (e.g. start) will fail with a lock error.
+        """
+        elapsed = 0.0
+        while elapsed < timeout:
+            result: dict = await asyncio.to_thread(
+                self._api.nodes(self._node).tasks(upid).status.get
+            )
+            if result.get("status") == "stopped":
+                exit_status = result.get("exitstatus", "")
+                if exit_status != "OK":
+                    raise RuntimeError(
+                        f"Proxmox task {upid} failed: {exit_status}"
+                    )
+                return
+            await asyncio.sleep(poll)
+            elapsed += poll
+        raise TimeoutError(f"Proxmox task {upid} did not complete within {timeout}s")

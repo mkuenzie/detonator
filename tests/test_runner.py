@@ -88,13 +88,13 @@ class FakeAgentClient:
         self.detonate_calls.append({"url": url, **kwargs})
 
     async def status(self):
-        from detonator.orchestrator.agent_client import AgentStatus
+        from detonator.orchestrator.agent_manager import AgentStatus
         idx = min(self._idx, len(self._statuses) - 1)
         self._idx += 1
         return AgentStatus(state=self._statuses[idx])
 
     async def wait_for_terminal(self, *, timeout_sec, poll_sec=2.0, pause_on_interactive=False):
-        from detonator.orchestrator.agent_client import AgentStatus
+        from detonator.orchestrator.agent_manager import AgentStatus
         # Walk through scripted states, honoring pause_on_interactive.
         while self._idx < len(self._statuses):
             state = self._statuses[self._idx]
@@ -107,7 +107,7 @@ class FakeAgentClient:
 
     async def resume(self):
         self.resumed = True
-        from detonator.orchestrator.agent_client import AgentStatus
+        from detonator.orchestrator.agent_manager import AgentStatus
         return AgentStatus(state="running")
 
     async def list_artifacts(self):
@@ -173,7 +173,7 @@ async def test_runner_happy_path(setup):
     def fake_client_factory(base_url, **_):
         return FakeAgentClient(base_url, statuses=["running", "complete"])
 
-    with patch("detonator.orchestrator.runner.AgentClient", side_effect=fake_client_factory):
+    with patch("detonator.orchestrator.runner.AgentManager", side_effect=fake_client_factory):
         runner = setup["make_runner"]()
         record = await runner.execute()
 
@@ -204,7 +204,7 @@ async def test_runner_records_error_on_agent_failure(setup):
     def fake_client_factory(base_url, **_):
         return FakeAgentClient(base_url, statuses=["error"])
 
-    with patch("detonator.orchestrator.runner.AgentClient", side_effect=fake_client_factory):
+    with patch("detonator.orchestrator.runner.AgentManager", side_effect=fake_client_factory):
         runner = setup["make_runner"]()
         record = await runner.execute()
 
@@ -221,7 +221,7 @@ async def test_runner_fails_without_vm_ip(setup):
 
     setup["vm"].ip = None
 
-    with patch("detonator.orchestrator.runner.AgentClient", side_effect=fake_client_factory):
+    with patch("detonator.orchestrator.runner.AgentManager", side_effect=fake_client_factory):
         runner = setup["make_runner"]()
         record = await runner.execute()
 
@@ -249,7 +249,7 @@ async def test_runner_interactive_waits_for_resume(setup):
 
     run_config = RunConfig(url="https://example.com", interactive=True)
 
-    with patch("detonator.orchestrator.runner.AgentClient", side_effect=fake_client_factory):
+    with patch("detonator.orchestrator.runner.AgentManager", side_effect=fake_client_factory):
         runner = setup["make_runner"](run_config=run_config)
 
         import asyncio as _asyncio

@@ -1,4 +1,4 @@
-"""HTTP client for the in-VM agent REST API.
+"""HTTP manager for the in-VM agent REST API.
 
 The orchestrator uses this to drive the agent from outside the sandbox:
 poll for health, start detonation, poll status, and download artifacts.
@@ -26,7 +26,7 @@ class AgentHealth(BaseModel):
     browser: str | None = None
 
 
-class AgentClient:
+class AgentManager:
     """Async client for a single in-VM agent instance."""
 
     def __init__(self, base_url: str, *, timeout: float = 30.0) -> None:
@@ -34,7 +34,7 @@ class AgentClient:
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> AgentClient:
+    async def __aenter__(self) -> AgentManager:
         self._client = httpx.AsyncClient(
             base_url=self._base_url, timeout=self._timeout
         )
@@ -47,7 +47,7 @@ class AgentClient:
 
     @property
     def client(self) -> httpx.AsyncClient:
-        assert self._client is not None, "use `async with AgentClient(...)`"
+        assert self._client is not None, "use `async with AgentManager(...)`"
         return self._client
 
     # ── Health ────────────────────────────────────────────────────

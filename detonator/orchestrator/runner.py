@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 
 from detonator.config import DetonatorConfig
 from detonator.models import RunConfig, RunRecord, RunState, StateTransition
-from detonator.orchestrator.agent_client import AgentClient
+from detonator.orchestrator.agent_manager import AgentManager
 from detonator.providers.vm.base import VMProvider
 from detonator.storage.database import Database
 from detonator.storage.filesystem import ArtifactStore
@@ -180,7 +180,7 @@ class Runner:
         base_url = f"http://{net_info.ip_address}:{self.config.agent.port}"
         logger.info("run=%s agent base_url=%s", self.record.id, base_url)
 
-        async with AgentClient(base_url) as agent:
+        async with AgentManager(base_url) as agent:
             await agent.wait_for_health(
                 timeout_sec=self.config.agent.health_timeout_sec,
                 poll_sec=self.config.agent.health_poll_sec,
@@ -215,7 +215,7 @@ class Runner:
         except Exception as exc:  # non-fatal — artifacts already saved
             logger.warning("run=%s VM stop failed: %s", self.record.id, exc)
 
-    async def _handle_interactive_pause(self, agent: AgentClient) -> None:
+    async def _handle_interactive_pause(self, agent: AgentManager) -> None:
         """Wait for the agent to enter `paused`, then block until resume is signaled."""
         # First, poll until the agent says it's paused (analyst takeover ready).
         st = await agent.wait_for_terminal(
@@ -232,7 +232,7 @@ class Runner:
         await agent.resume()
         await self._transition(RunState.DETONATING, "resumed from interactive")
 
-    async def _collect_artifacts(self, agent: AgentClient) -> None:
+    async def _collect_artifacts(self, agent: AgentManager) -> None:
         """Download all artifacts from the agent and persist them + index them in SQLite."""
         run_dir = self.artifact_store.ensure_run_dir(str(self.record.id))
         downloaded = await agent.download_all(run_dir)

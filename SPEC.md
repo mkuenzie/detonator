@@ -36,8 +36,8 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 - [x] Windows base image setup guide ([agent/README.md](agent/README.md))
 
 ### Remaining
-- [ ] Build and test a real Windows base VM image per the README
-- [ ] End-to-end smoke: hit `/detonate` against a hardcoded URL, verify HAR + screenshot + DOM + console are valid
+- [x] Build and test a real Windows base VM image per the README
+- [x] End-to-end smoke: hit `/detonate` against a hardcoded URL, verify HAR + screenshot + DOM + console are valid
 - [ ] Tests for the agent API (FastAPI TestClient, mocked BrowserModule)
 - [ ] Tests for the Playwright module (integration, run on demand, not in default pytest)
 - [ ] Decide: Linux guest support (deferred — Windows first per user direction)

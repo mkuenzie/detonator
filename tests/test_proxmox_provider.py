@@ -89,13 +89,72 @@ async def test_stop_force(provider: ProxmoxProvider):
     provider._api.nodes(provider._node).qemu.return_value.status.stop.post.assert_called_once()
 
 
-async def test_revert_stopped_vm(provider: ProxmoxProvider):
-    provider._api.nodes(provider._node).qemu.return_value.status.current.get.return_value = {
-        "status": "stopped"
+def _setup_task_ok(provider: ProxmoxProvider, upid: str = "UPID:pve:00001234:rollback") -> None:
+    """Wire the rollback UPID and a successful task-status response."""
+    node_mock = provider._api.nodes.return_value
+    node_mock.qemu.return_value.snapshot.return_value.rollback.post.return_value = upid
+    node_mock.tasks.return_value.status.get.return_value = {
+        "status": "stopped",
+        "exitstatus": "OK",
     }
+
+
+async def test_revert_stopped_vm(provider: ProxmoxProvider):
+    node_mock = provider._api.nodes.return_value
+    node_mock.qemu.return_value.status.current.get.return_value = {"status": "stopped"}
+    _setup_task_ok(provider)
+
     with _patch_to_thread():
         await provider.revert("100", "clean")
-    provider._api.nodes(provider._node).qemu.return_value.snapshot.return_value.rollback.post.assert_called_once()
+
+    node_mock.qemu.return_value.snapshot.return_value.rollback.post.assert_called_once()
+    node_mock.tasks.return_value.status.get.assert_called_once()
+
+
+async def test_revert_waits_for_task_before_returning(provider: ProxmoxProvider):
+    """revert() must not return until the rollback task exits — poll count is observable."""
+    node_mock = provider._api.nodes.return_value
+    node_mock.qemu.return_value.status.current.get.return_value = {"status": "stopped"}
+
+    upid = "UPID:pve:ABCDEF:rollback"
+    node_mock.qemu.return_value.snapshot.return_value.rollback.post.return_value = upid
+    # First poll returns "running"; second returns "stopped OK".
+    node_mock.tasks.return_value.status.get.side_effect = [
+        {"status": "running"},
+        {"status": "stopped", "exitstatus": "OK"},
+    ]
+
+    with _patch_to_thread(), patch("detonator.providers.vm.proxmox.asyncio.sleep"):
+        await provider.revert("100", "clean")
+
+    assert node_mock.tasks.return_value.status.get.call_count == 2
+
+
+async def test_revert_raises_on_task_failure(provider: ProxmoxProvider):
+    node_mock = provider._api.nodes.return_value
+    node_mock.qemu.return_value.status.current.get.return_value = {"status": "stopped"}
+    node_mock.qemu.return_value.snapshot.return_value.rollback.post.return_value = "UPID:pve:FAIL:rollback"
+    node_mock.tasks.return_value.status.get.return_value = {
+        "status": "stopped",
+        "exitstatus": "ERROR: snapshot not found",
+    }
+
+    with _patch_to_thread(), pytest.raises(RuntimeError, match="snapshot not found"):
+        await provider.revert("100", "clean")
+
+
+async def test_revert_raises_on_task_timeout(provider: ProxmoxProvider):
+    node_mock = provider._api.nodes.return_value
+    node_mock.qemu.return_value.status.current.get.return_value = {"status": "stopped"}
+    node_mock.qemu.return_value.snapshot.return_value.rollback.post.return_value = "UPID:pve:HANG:rollback"
+    node_mock.tasks.return_value.status.get.return_value = {"status": "running"}
+
+    with (
+        _patch_to_thread(),
+        patch("detonator.providers.vm.proxmox.asyncio.sleep"),
+        pytest.raises(TimeoutError, match="did not complete"),
+    ):
+        await provider._wait_for_task("UPID:pve:HANG:rollback", timeout=2, poll=1)
 
 
 async def test_get_network_info_with_agent(provider: ProxmoxProvider):
