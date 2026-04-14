@@ -226,7 +226,7 @@ async def test_runner_fails_without_vm_ip(setup):
         record = await runner.execute()
 
     assert record.state == RunState.ERROR
-    assert "no reachable IP" in record.error
+    assert "did not report an IP" in record.error
 
 
 async def test_runner_requires_vm_id_and_snapshot(setup, tmp_path):

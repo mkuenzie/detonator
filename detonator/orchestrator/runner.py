@@ -166,6 +166,33 @@ class Runner:
         await self._transition(RunState.PREFLIGHT, "skipped (phase 3)")
         # Intentional no-op in phase 2. Phase 3 will plug in EgressProvider.preflight_check().
 
+    async def _wait_for_ip(self, vm_id: str) -> str:
+        """Poll get_network_info until the guest agent reports an IP address.
+
+        The QEMU guest agent starts after the OS boots, which on Windows can
+        take 30–90 seconds.  We reuse the agent health-check timeout budget
+        since both waits are gating the same thing: the VM being ready.
+        """
+        timeout = self.config.agent.health_timeout_sec
+        poll = self.config.agent.health_poll_sec
+        elapsed = 0.0
+        while elapsed < timeout:
+            net_info = await self.vm_provider.get_network_info(vm_id)
+            if net_info.ip_address:
+                return net_info.ip_address
+            logger.debug(
+                "run=%s VM %s has no IP yet — waiting for guest agent (%.0fs/%.0fs)",
+                self.record.id,
+                vm_id,
+                elapsed,
+                timeout,
+            )
+            await asyncio.sleep(poll)
+            elapsed += poll
+        raise RunnerError(
+            f"VM {vm_id} did not report an IP within {timeout}s — guest agent not ready?"
+        )
+
     async def _detonate_and_collect(self) -> None:
         """Trigger the in-VM agent and collect artifacts."""
         await self._transition(RunState.DETONATING)
@@ -173,11 +200,9 @@ class Runner:
         vm_id = self.record.config.vm_id or self.config.default_vm_id
         assert vm_id is not None  # already validated in _provision
 
-        # Resolve the agent base URL from VM network info + configured agent port.
-        net_info = await self.vm_provider.get_network_info(vm_id)
-        if not net_info.ip_address:
-            raise RunnerError(f"VM {vm_id} has no reachable IP (no guest agent?)")
-        base_url = f"http://{net_info.ip_address}:{self.config.agent.port}"
+        # Wait for the guest agent to report the VM's IP (Windows takes time to boot).
+        ip = await self._wait_for_ip(vm_id)
+        base_url = f"http://{ip}:{self.config.agent.port}"
         logger.info("run=%s agent base_url=%s", self.record.id, base_url)
 
         async with AgentManager(base_url) as agent:
