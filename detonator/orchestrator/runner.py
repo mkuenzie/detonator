@@ -27,6 +27,7 @@ from uuid import UUID, uuid4
 
 from detonator.analysis.chain import extract_chain
 from detonator.analysis.filter import NoiseFilter
+from detonator.analysis.har_body_map import map_body_files_to_urls
 from detonator.config import AgentInstanceConfig, DetonatorConfig
 from detonator.enrichment.pipeline import EnrichmentPipeline
 from detonator.logging import RunAdapter
@@ -334,12 +335,24 @@ class Runner:
 
     async def _collect_artifacts(self, agent: AgentManager) -> None:
         """Download all artifacts from the agent and persist them + index them in SQLite."""
+        from pathlib import Path
+
         run_dir = self.artifact_store.ensure_run_dir(str(self.record.id))
         downloaded = await agent.download_all(run_dir)
 
+        # Parse the HAR once so the insert loop can classify + stamp body files
+        # with their originating URL in a single pass.
+        body_map: dict[str, str] = {}
+        har_path = run_dir / "har_full.har"
+        if har_path.exists():
+            try:
+                body_map = map_body_files_to_urls(har_path)
+            except Exception as exc:
+                self._log.warning("har_body_map failed: %s", exc)
+
         for name, path, size in downloaded:
-            artifact_type = self._infer_artifact_type(name)
-            # ArtifactStore.download path is already final; compute hash now.
+            source_url = body_map.get(Path(name).name)
+            artifact_type = self._infer_artifact_type(name, source_url=source_url)
             content_hash = ArtifactStore._sha256(path)
             await self.database.insert_artifact(
                 str(self.record.id),
@@ -347,15 +360,23 @@ class Runner:
                 str(path),
                 size=size,
                 content_hash=content_hash,
+                source_url=source_url,
             )
 
     @staticmethod
-    def _infer_artifact_type(name: str) -> str:
-        """Map an artifact filename to one of our ``ArtifactType`` values."""
+    def _infer_artifact_type(name: str, *, source_url: str | None = None) -> str:
+        """Map an artifact filename to one of our ``ArtifactType`` values.
+
+        When ``source_url`` is set, the file is a Playwright HAR body attachment
+        (a fetched response body) — classify it as ``site_resource`` regardless
+        of its content-addressed filename.
+        """
+        if source_url:
+            return "site_resource"
         lower = name.lower()
         if lower.startswith("screenshots/") or lower.endswith((".png", ".jpg", ".jpeg")):
             return "screenshot"
-        if "har" in lower and lower.endswith(".json"):
+        if "har" in lower and lower.endswith((".har", ".json")):
             return "har_full"
         if lower.endswith("dom.html") or lower.endswith(".html"):
             return "dom"

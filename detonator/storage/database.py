@@ -12,7 +12,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_SQL = """
 -- Core tables
@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
     type            TEXT NOT NULL,
     path            TEXT NOT NULL,
     size            INTEGER,
-    content_hash    TEXT
+    content_hash    TEXT,
+    source_url      TEXT
 );
 
 -- Campaign tables
@@ -153,6 +154,11 @@ class Database:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.executescript(_SCHEMA_SQL)
+        # Migration: add source_url column to existing artifacts tables (schema v1 → v2).
+        cursor = await self._db.execute("PRAGMA table_info(artifacts)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "source_url" not in columns:
+            await self._db.execute("ALTER TABLE artifacts ADD COLUMN source_url TEXT")
         await self._db.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
             ("version", str(SCHEMA_VERSION)),
@@ -271,11 +277,17 @@ class Database:
     # ── Artifacts ─────────────────────────────────────────────────
 
     async def insert_artifact(
-        self, run_id: str, artifact_type: str, path: str, size: int | None = None, content_hash: str | None = None
+        self,
+        run_id: str,
+        artifact_type: str,
+        path: str,
+        size: int | None = None,
+        content_hash: str | None = None,
+        source_url: str | None = None,
     ) -> None:
         await self.db.execute(
-            "INSERT INTO artifacts (run_id, type, path, size, content_hash) VALUES (?, ?, ?, ?, ?)",
-            (run_id, artifact_type, path, size, content_hash),
+            "INSERT INTO artifacts (run_id, type, path, size, content_hash, source_url) VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, artifact_type, path, size, content_hash, source_url),
         )
         await self.db.commit()
 

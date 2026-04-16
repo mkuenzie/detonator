@@ -55,6 +55,21 @@ async def test_artifacts(db: Database):
     assert artifacts[0]["type"] == "har_full"
 
 
+async def test_artifact_source_url_round_trip(db: Database):
+    """insert_artifact persists source_url when supplied, None otherwise."""
+    await db.insert_run("r-src", "https://src.com", "direct", {}, "2026-04-09T00:00:00")
+
+    await db.insert_artifact("r-src", "meta", "/runs/r-src/abc.bin", 512, "hash1")
+    await db.insert_artifact(
+        "r-src", "site_resource", "/runs/r-src/def.bin", 256, "hash2",
+        source_url="https://src.com/script.js",
+    )
+
+    by_hash = {a["content_hash"]: a for a in await db.get_artifacts("r-src")}
+    assert by_hash["hash1"]["source_url"] is None
+    assert by_hash["hash2"]["source_url"] == "https://src.com/script.js"
+
+
 async def test_observable_upsert_and_find(db: Database):
     await db.upsert_observable("obs-1", "domain", "example.com", "2026-04-09T00:00:00")
     await db.upsert_observable("obs-1", "domain", "example.com", "2026-04-10T00:00:00")
