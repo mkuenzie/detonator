@@ -136,7 +136,6 @@ def _register_routes(app: FastAPI) -> None:
     async def dashboard(request: Request):
         deps = _deps(request)
         agents = await _load_agents(deps)
-        vms, vm_err = await _load_vm_list(deps)
         recent_runs = await deps.database.list_runs(limit=5, offset=0)
         active_run_ids = [str(rid) for rid in deps.active_run_ids()]
         return TEMPLATES.TemplateResponse(
@@ -144,8 +143,6 @@ def _register_routes(app: FastAPI) -> None:
             "dashboard.html",
             {
                 "agents": agents,
-                "vms": vms,
-                "vm_error": vm_err,
                 "vm_provider_type": deps.config.vm_provider.type,
                 "egress_options": list(deps.config.egress.keys()),
                 "recent_runs": recent_runs,
