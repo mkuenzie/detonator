@@ -1,4 +1,5 @@
 log_level = "INFO"
+enrichment_modules = ["whois", "dns", "tls", "favicon"]
 
 [vm_provider]
 type = "proxmox"
@@ -70,8 +71,6 @@ lan_cidr = "192.168.1.0/24"
 # uplink_interface = "usb0"
 # sandbox_cidr = "192.168.100.0/24"
 # lan_cidr = "192.168.1.0/24"
-
-enrichment_modules = ["whois", "dns", "tls", "favicon"]
 
 # HAR chain filter — controls which requests are written to har_chain.json.
 # noise_domains supplements (does not replace) the built-in tracker list.

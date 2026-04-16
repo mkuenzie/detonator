@@ -13,9 +13,6 @@
        hx-target="#run-state"
        hx-swap="innerHTML"></div>
   {% endif %}
-  <div style="margin-left:auto">
-    <a href="/runs/{{ run.id }}/artifacts.zip" role="button" class="secondary">Download zip</a>
-  </div>
 </header>
 
 <section>
@@ -36,9 +33,7 @@
       </div>
     {% endif %}
     {% if run.error %}
-      <div style="margin-top:0.5rem;padding:0.5rem;background:#fbd5d5;color:#842029;border-radius:4px" class="mono">
-        {{ run.error }}
-      </div>
+      <div class="run-error mono">{{ run.error }}</div>
     {% endif %}
   </article>
 </section>
@@ -61,11 +56,9 @@
     <ol class="timeline">
       {% for t in transitions %}
         <li>
-          <div>
-            <span class="status-badge {{ t.to_state }}">{{ t.to_state }}</span>
-            <span class="muted mono" style="font-size:0.85em">{{ t.timestamp|datetime }}</span>
-          </div>
-          {% if t.detail %}<div class="muted mono" style="font-size:0.85em">{{ t.detail }}</div>{% endif %}
+          <span class="status-badge {{ t.to_state }}">{{ t.to_state }}</span>
+          <div class="muted mono" style="font-size:0.8em;margin-top:0.25rem">{{ t.timestamp|datetime }}</div>
+          {% if t.detail %}<div class="muted mono" style="font-size:0.8em">{{ t.detail }}</div>{% endif %}
         </li>
       {% endfor %}
     </ol>
@@ -75,7 +68,10 @@
 </section>
 
 <section>
-  <h3>Artifacts <span class="muted">({{ artifacts|length }})</span></h3>
+  <h3 style="display:flex;align-items:center;gap:1rem">
+    Artifacts <span class="muted">({{ artifacts|length }})</span>
+    <a href="/runs/{{ run.id }}/artifacts.zip" role="button" class="secondary" style="font-size:0.85rem;padding:0.25rem 0.75rem">Download zip</a>
+  </h3>
   {% if artifacts %}
     <table>
       <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>

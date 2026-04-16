@@ -128,24 +128,35 @@ table.runs td {
 }
 
 .timeline {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
   list-style: none;
-  padding-left: 0;
-  border-left: 2px solid var(--pico-muted-border-color);
-  margin-left: 0.5rem;
+  padding: 0;
+  margin: 0 0 1rem 0;
+  align-items: flex-start;
+  gap: 0;
 }
 .timeline li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
   position: relative;
-  padding: 0.3rem 0 0.3rem 1rem;
+  padding: 0.5rem 1.2rem 0.5rem 0.5rem;
+  flex-shrink: 0;
 }
 .timeline li::before {
-  content: "";
+  display: none;
+}
+.timeline li:not(:last-child)::after {
+  content: "›";
   position: absolute;
-  left: -6px;
-  top: 0.75rem;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--pico-primary);
+  right: 0.1rem;
+  top: 0.55rem;
+  font-size: 1.3rem;
+  color: var(--pico-muted-color);
+  line-height: 1;
 }
 
 details.json {
@@ -165,4 +176,47 @@ details.json pre {
   gap: 1rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.run-error {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: #fbd5d5;
+  color: #842029;
+  border-radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .status-badge.pending,
+  .status-badge.provisioning,
+  .status-badge.preflight,
+  .status-badge.detonating,
+  .status-badge.collecting,
+  .status-badge.enriching,
+  .status-badge.filtering {
+    background: #2d2500;
+    color: #d4b44a;
+  }
+  .status-badge.interactive {
+    background: #0d2235;
+    color: #64b5f6;
+  }
+  .status-badge.complete,
+  .status-badge.running {
+    background: #0d2819;
+    color: #4caf82;
+  }
+  .status-badge.error {
+    background: #2d0d0d;
+    color: #e57373;
+  }
+  .status-badge.stopped,
+  .status-badge.unknown {
+    background: #2a2a2a;
+    color: #999;
+  }
+  .run-error {
+    background: #2d0d0d;
+    color: #e57373;
+  }
 }
