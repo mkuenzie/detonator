@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Detonator{% endblock %}</title>
+  <link rel="stylesheet" href="/ui/static/pico.min.css">
+  <link rel="stylesheet" href="/ui/static/style.css">
+  <script src="/ui/static/htmx.min.js" defer></script>
+</head>
+<body>
+  <nav class="primary">
+    <a href="/ui/" class="brand">detonator</a>
+    <a href="/ui/">Dashboard</a>
+    <a href="/ui/runs">Runs</a>
+    <a href="/ui/config">Config</a>
+    <span style="margin-left:auto" class="muted">
+      <a href="/docs" target="_blank">API docs</a>
+    </span>
+  </nav>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

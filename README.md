@@ -19,10 +19,10 @@ Clone or copy the repository to the host, then create a virtualenv and install:
 cd /opt/detonator          # or wherever you placed the repo
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[proxmox,enrichment]"
+pip install -e ".[proxmox,enrichment,ui]"
 ```
 
-The `proxmox` extra adds `proxmoxer` (Proxmox API client). The `enrichment` extra adds `dnspython`, `cryptography`, and `mmh3`. Omit `enrichment` if you are only running Phases 0–2 (enrichment pipeline is Phase 4).
+The `proxmox` extra adds `proxmoxer` (Proxmox API client). The `enrichment` extra adds `dnspython`, `cryptography`, `asyncwhois`, and `mmh3`. The `ui` extra adds `jinja2` and `python-multipart` — required to serve the `/ui/` web interface; omit it for headless deployments.
 
 Verify the install:
 
@@ -44,10 +44,6 @@ $EDITOR config.toml
 ```toml
 log_level = "INFO"           # DEBUG, INFO, WARNING, ERROR
 
-# VM to use when a run doesn't specify one explicitly.
-default_vm_id = "100"
-default_snapshot = "clean"
-
 [vm_provider]
 type = "proxmox"
 
@@ -64,10 +60,22 @@ node        = "pve"                # Proxmox node name
 data_dir = "data"               # Artifacts land here: data/runs/{run-uuid}/
 db_path  = "data/detonator.db" # SQLite database
 
-[agent]
-port              = 8000   # The port the in-VM agent listens on
-health_timeout_sec = 60    # How long to wait for the agent to become healthy after VM start
-health_poll_sec    = 2     # Polling interval during health wait
+# One or more named agents. A run picks an agent by name (or the first one
+# is used by default). Each agent binds a VM + snapshot + the in-VM agent port.
+[[agents]]
+name               = "win11-sandbox"
+vm_id              = "100"
+snapshot           = "clean"
+port               = 8000   # The port the in-VM agent listens on
+health_timeout_sec = 60     # How long to wait for the agent to become healthy after VM start
+health_poll_sec    = 2      # Polling interval during health wait
+
+# Declare additional agents by repeating the [[agents]] block:
+# [[agents]]
+# name     = "win10-sandbox"
+# vm_id    = "101"
+# snapshot = "clean"
+# port     = 8000
 
 [timeouts]
 provision_sec = 120   # VM revert + start
@@ -146,14 +154,27 @@ curl http://localhost:8080/health
 # {"status":"ok","vm_provider":"proxmox","active_runs":0}
 ```
 
+## Web UI
+
+With the `ui` extra installed, the orchestrator serves a browser UI at `/ui/`:
+
+- `/ui/` — dashboard (VM provider + agent status, recent runs, quick-submit form)
+- `/ui/config` — VM provider details, configured agents, egress options
+- `/ui/runs` — filterable run list with live status polling
+- `/ui/runs/{id}` — run detail with state timeline, artifacts, enrichment, techniques, observables
+
+The UI is a thin server-rendered layer over the existing JSON API (Jinja2 + HTMX, no JS build step). It polls active runs every 2s for live state updates.
+
 ## Submitting a Run
 
 ```bash
 curl -s -X POST http://localhost:8080/runs \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com","timeout_sec":120,"interactive":false}' \
+  -d '{"url":"https://example.com","agent":"win11-sandbox","timeout_sec":120,"interactive":false}' \
   | python3 -m json.tool
 ```
+
+The `agent` field is optional — the first configured agent is used if omitted. Use it when multiple agents are declared.
 
 Response:
 ```json
@@ -272,5 +293,7 @@ The `data/` directory is created on startup relative to the working directory. S
 | Endpoint | Method | Description |
 |---|---|---|
 | `/health` | GET | Orchestrator health + active-run count |
+| `/config/agents` | GET | Configured agents + current VM state for each |
 | `/config/egress` | GET | Configured egress options |
 | `/config/vms` | GET | VM list from the provider (503 if Proxmox is unreachable) |
+| `/ui/` | GET | Web UI (requires `ui` extra) |

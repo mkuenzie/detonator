@@ -21,6 +21,8 @@ Interactive, HAR-first URL detonation framework for a home malware/phishing anal
 
 ```
 Analyst → Host Orchestrator (FastAPI)
+            ├── REST API  (JSON, at /)
+            ├── Web UI    (Jinja2 + HTMX, at /ui/)
             ├── VMProvider (Proxmox first)
             ├── EgressProvider (direct / vpn / tether)
             ├── Agent REST client
@@ -57,6 +59,7 @@ Relationship tables (`observable_links`, `run_observables`, `campaign_observable
 | Favicon hash | `Enricher` | `mmh3` + `hashlib` |
 | Host API | — | FastAPI + uvicorn |
 | Agent API | — | FastAPI |
+| Web UI | — | Jinja2 + HTMX (+ Pico CSS, vendored); cytoscape.js planned for graph |
 | Storage | — | SQLite (`aiosqlite`) + filesystem |
 | Config | — | TOML (`tomllib`) |
 | VM guest OS | — | **Windows 10/11 first** (not Linux) |
@@ -72,13 +75,17 @@ detonator/
   detonator/                     # Host orchestrator package
     config.py                    # TOML config loading + Pydantic models
     models/                      # Shared data models (vm, run, observables)
-    orchestrator/                # FastAPI app + runner + agent client (Phase 2)
+    orchestrator/                # FastAPI app + runner + agent manager (Phase 2)
     providers/
       vm/                        # VMProvider ABC + Proxmox impl
       egress/                    # EgressProvider ABC + direct/vpn/tether (Phase 3)
     enrichment/                  # Enricher ABC + whois/dns/tls/favicon (Phase 4)
     analysis/                    # chain.py, filter.py (Phase 5)
     storage/                     # database.py, filesystem.py, manifest.py
+    ui/                          # Jinja2 + HTMX web UI, mounted at /ui/ (Phase 7)
+      routes.py                  # All UI + HTMX-partial handlers
+      templates/                 # Jinja2 pages (dashboard, config, runs, run_detail)
+      static/                    # Vendored htmx.min.js + pico.min.css + style.css
   agent/                         # In-VM agent (runs on the Windows sandbox)
     api.py                       # FastAPI REST API
     browser/
@@ -99,7 +106,8 @@ Every transition is logged with a timestamp and detail. Each stage has a configu
 
 - **Python 3.11+**, `from __future__ import annotations`, Pydantic models, `datetime.now(UTC)` (never `utcnow()`).
 - **Async throughout** for I/O-bound work (provider calls, agent HTTP, enrichment fan-out).
-- **Virtualenv at `.venv/`** at the repo root. Install via `pip install -e ".[dev,proxmox,agent,enrichment]"` depending on what you're touching.
+- **Virtualenv at `.venv/`** at the repo root. Install via `pip install -e ".[dev,proxmox,agent,enrichment,ui]"` depending on what you're touching. The `ui` extra (jinja2 + python-multipart) is required to serve `/ui/`; omit it for headless deployments.
+- **Agents are configured, not defaulted.** `config.toml` declares one or more `[[agents]]` entries (name + vm_id + snapshot + port + health timeouts). The Runner takes an `AgentInstanceConfig` explicitly — do not re-introduce the old `default_vm_id` / `default_snapshot` fallback path.
 - **Tests use pytest + pytest-asyncio**. Proxmox tests mock at the module level (patch `detonator.providers.vm.proxmox.asyncio.to_thread`) — `AsyncMock` doesn't play nicely with `asyncio.to_thread` in 3.12+.
 - **No secrets in code or tests.** Config loads from TOML; example at `config.example.toml`.
 - **Structured JSON logging** with per-run context (run ID). Not fully wired yet — add it as components land.
@@ -112,7 +120,6 @@ Every transition is logged with a timestamp and detail. Each stage has a configu
 - Headless mode
 - Multi-VM concurrent runs
 - Authentication on the host API
-- Web UI
 - Linux guest support (Windows first)
 
 ## When starting a new phase

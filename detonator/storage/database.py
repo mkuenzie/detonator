@@ -201,24 +201,72 @@ class Database:
         return dict(row) if row else None
 
     async def list_runs(
-        self, *, status: str | None = None, limit: int = 50, offset: int = 0
+        self,
+        *,
+        status: str | None = None,
+        domain: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
     ) -> list[dict]:
+        """List runs with optional filters.
+
+        Args:
+            status: Exact status match (e.g. ``"complete"``, ``"error"``).
+            domain: Substring match against ``seed_url`` (e.g. ``"evil.com"``).
+            date_from: ISO-8601 lower bound on ``created_at`` (inclusive).
+            date_to: ISO-8601 upper bound on ``created_at`` (inclusive).
+            limit: Maximum rows to return (1–500).
+            offset: Pagination offset.
+        """
+        conditions: list[str] = []
+        params: list[Any] = []
+
         if status:
-            cursor = await self.db.execute(
-                "SELECT * FROM runs WHERE status=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (status, limit, offset),
-            )
-        else:
-            cursor = await self.db.execute(
-                "SELECT * FROM runs ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
+            conditions.append("status=?")
+            params.append(status)
+        if domain:
+            conditions.append("seed_url LIKE ?")
+            params.append(f"%{domain}%")
+        if date_from:
+            conditions.append("created_at >= ?")
+            params.append(date_from)
+        if date_to:
+            conditions.append("created_at <= ?")
+            params.append(date_to)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        cursor = await self.db.execute(
+            f"SELECT * FROM runs {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        )
         return [dict(row) for row in await cursor.fetchall()]
 
     async def delete_run(self, run_id: str) -> bool:
         cursor = await self.db.execute("DELETE FROM runs WHERE id=?", (run_id,))
         await self.db.commit()
         return cursor.rowcount > 0
+
+    async def find_runs_by_domain(self, domain: str, limit: int = 50) -> list[dict]:
+        """Return runs that touched *domain* via seed URL or enriched observable.
+
+        Matches runs where:
+        - ``seed_url`` contains *domain* as a substring, OR
+        - The run has a ``domain``-type observable whose value equals *domain*.
+        """
+        cursor = await self.db.execute(
+            """SELECT DISTINCT r.*
+               FROM runs r
+               LEFT JOIN run_observables ro ON ro.run_id = r.id
+               LEFT JOIN observables o ON o.id = ro.observable_id
+               WHERE r.seed_url LIKE ?
+                  OR (o.type = 'domain' AND lower(o.value) = lower(?))
+               ORDER BY r.created_at DESC
+               LIMIT ?""",
+            (f"%{domain}%", domain, limit),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
 
     # ── Artifacts ─────────────────────────────────────────────────
 
@@ -234,6 +282,18 @@ class Database:
     async def get_artifacts(self, run_id: str) -> list[dict]:
         cursor = await self.db.execute(
             "SELECT * FROM artifacts WHERE run_id=?", (run_id,)
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+    async def get_technique_matches_for_run(self, run_id: str) -> list[dict]:
+        """Return technique match rows joined with technique metadata for one run."""
+        cursor = await self.db.execute(
+            """SELECT tm.technique_id, tm.confidence, tm.evidence_json,
+                      t.name, t.description, t.signature_type
+               FROM technique_matches tm
+               JOIN techniques t ON t.id = tm.technique_id
+               WHERE tm.run_id = ?""",
+            (run_id,),
         )
         return [dict(row) for row in await cursor.fetchall()]
 

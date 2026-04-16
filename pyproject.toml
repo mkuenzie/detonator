@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 proxmox = ["proxmoxer>=2.0", "requests>=2.31"]
 enrichment = [
+    "asyncwhois>=1.0",
     "dnspython>=2.6",
     "cryptography>=42.0",
     "mmh3>=4.1",
@@ -27,6 +28,10 @@ agent = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "playwright>=1.43",
+]
+ui = [
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
 ]
 dev = [
     "pytest>=8.1",

@@ -1,0 +1,85 @@
+{% extends "_base.html" %}
+{% block title %}Dashboard · Detonator{% endblock %}
+
+{% block content %}
+<header>
+  <h2>Dashboard</h2>
+  <p class="muted">VM provider: <strong>{{ vm_provider_type }}</strong> ·
+    {{ active_run_ids|length }} active run{% if active_run_ids|length != 1 %}s{% endif %}</p>
+</header>
+
+<section>
+  <h3>Submit a run</h3>
+  <form method="post" action="/ui/runs">
+    <div class="grid">
+      <label>
+        URL
+        <input type="url" name="url" placeholder="https://suspicious.example/" required>
+      </label>
+      <label>
+        Agent
+        <select name="agent" required>
+          {% for a in agents %}
+            <option value="{{ a.name }}">{{ a.name }} (vm {{ a.vm_id }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Egress
+        <select name="egress">
+          {% for name in egress_options %}
+            <option value="{{ name }}">{{ name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Timeout (s)
+        <input type="number" name="timeout_sec" value="60" min="10" max="3600">
+      </label>
+    </div>
+    <label>
+      <input type="checkbox" name="interactive" value="true">
+      Interactive (pause for analyst takeover)
+    </label>
+    <button type="submit" {% if not agents %}disabled{% endif %}>Detonate</button>
+    {% if not agents %}
+      <small class="muted">No agents configured — add an <code>[[agents]]</code> entry to config.toml.</small>
+    {% endif %}
+  </form>
+</section>
+
+<section>
+  <h3>Agents</h3>
+  <div id="agents-cards"
+       hx-get="/ui/_partials/agents"
+       hx-trigger="every 5s"
+       hx-swap="innerHTML">
+    {% include "_partials/agents.html" %}
+  </div>
+</section>
+
+<section>
+  <h3>Recent runs</h3>
+  {% if recent_runs %}
+    <table class="runs">
+      <thead>
+        <tr><th>Status</th><th>URL</th><th>Egress</th><th>Created</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for r in recent_runs %}
+        <tr>
+          <td><span class="status-badge {{ r.status }}">{{ r.status }}</span></td>
+          <td><span class="truncate mono">{{ r.seed_url }}</span></td>
+          <td>{{ r.egress_type }}</td>
+          <td class="muted">{{ r.created_at|datetime }}</td>
+          <td><a href="/ui/runs/{{ r.id }}">details →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p><a href="/ui/runs">See all runs →</a></p>
+  {% else %}
+    <p class="muted">No runs yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

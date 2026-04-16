@@ -1,0 +1,28 @@
+{% if runs %}
+<table class="runs">
+  <thead>
+    <tr>
+      <th>Status</th>
+      <th>URL</th>
+      <th>Egress</th>
+      <th>Created</th>
+      <th>Duration</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in runs %}
+    <tr>
+      <td><span class="status-badge {{ r.status }}">{{ r.status }}</span></td>
+      <td><span class="truncate mono" title="{{ r.seed_url }}">{{ r.seed_url }}</span></td>
+      <td>{{ r.egress_type }}</td>
+      <td class="muted">{{ r.created_at|datetime }}</td>
+      <td class="muted">{{ r.created_at|duration(r.completed_at) }}</td>
+      <td><a href="/ui/runs/{{ r.id }}">details →</a></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+  <p class="muted">No runs match.</p>
+{% endif %}

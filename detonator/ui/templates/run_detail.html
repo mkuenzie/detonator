@@ -1,0 +1,177 @@
+{% extends "_base.html" %}
+{% block title %}Run {{ run.id[:8] }} · Detonator{% endblock %}
+
+{% block content %}
+<header style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
+  <h2 style="margin:0">Run <span class="mono">{{ run.id[:8] }}</span></h2>
+  <div id="run-state">
+    {% include "_partials/run_state.html" %}
+  </div>
+  {% if not is_terminal %}
+  <div hx-get="/ui/_partials/run-state/{{ run.id }}"
+       hx-trigger="every 2s"
+       hx-target="#run-state"
+       hx-swap="innerHTML"></div>
+  {% endif %}
+  <div style="margin-left:auto">
+    <a href="/runs/{{ run.id }}/artifacts.zip" role="button" class="secondary">Download zip</a>
+  </div>
+</header>
+
+<section>
+  <article class="card">
+    <div class="flex-row">
+      <div><span class="muted">URL:</span> <span class="mono">{{ run.seed_url }}</span></div>
+    </div>
+    <div class="flex-row" style="margin-top:0.5rem">
+      <div><span class="muted">Egress:</span> {{ run.egress_type }}</div>
+      <div><span class="muted">Created:</span> {{ run.created_at|datetime }}</div>
+      <div><span class="muted">Completed:</span> {{ run.completed_at|datetime }}</div>
+      <div><span class="muted">Duration:</span> {{ run.created_at|duration(run.completed_at) }}</div>
+    </div>
+    {% if run_cfg.vm_id or run_cfg.snapshot_id %}
+      <div class="flex-row muted mono" style="margin-top:0.3rem;font-size:0.9em">
+        {% if run_cfg.vm_id %}vm_id override: {{ run_cfg.vm_id }}{% endif %}
+        {% if run_cfg.snapshot_id %}snapshot override: {{ run_cfg.snapshot_id }}{% endif %}
+      </div>
+    {% endif %}
+    {% if run.error %}
+      <div style="margin-top:0.5rem;padding:0.5rem;background:#fbd5d5;color:#842029;border-radius:4px" class="mono">
+        {{ run.error }}
+      </div>
+    {% endif %}
+  </article>
+</section>
+
+{% if console_url %}
+<section>
+  <article class="card" style="border-left:3px solid var(--pico-primary)">
+    <strong>Interactive mode</strong> — agent is paused for analyst takeover.
+    <p><a href="{{ console_url }}" target="_blank" rel="noopener">Open VM console →</a></p>
+    <form method="post" action="/ui/runs/{{ run.id }}/resume" style="display:inline">
+      <button type="submit">Resume run</button>
+    </form>
+  </article>
+</section>
+{% endif %}
+
+<section>
+  <h3>State timeline</h3>
+  {% if transitions %}
+    <ol class="timeline">
+      {% for t in transitions %}
+        <li>
+          <div>
+            <span class="status-badge {{ t.to_state }}">{{ t.to_state }}</span>
+            <span class="muted mono" style="font-size:0.85em">{{ t.timestamp|datetime }}</span>
+          </div>
+          {% if t.detail %}<div class="muted mono" style="font-size:0.85em">{{ t.detail }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="muted">No transitions recorded yet.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Artifacts <span class="muted">({{ artifacts|length }})</span></h3>
+  {% if artifacts %}
+    <table>
+      <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
+      <tbody>
+      {% for a in artifacts %}
+        <tr>
+          <td>{{ a.type }}</td>
+          <td class="mono">{{ a.path.split('/')[-1] if '/' in a.path else a.path }}</td>
+          <td class="muted">{{ a.size|bytes }}</td>
+          <td class="mono muted" title="{{ a.content_hash }}">{{ (a.content_hash or '')[:12] }}{% if a.content_hash %}…{% endif %}</td>
+          <td><a href="/runs/{{ run.id }}/artifacts/{{ a.path.split('/')[-1] if '/' in a.path else a.path }}">download</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No artifacts yet.</p>
+  {% endif %}
+</section>
+
+{% if enrichment %}
+<section>
+  <h3>Enrichment</h3>
+  <article class="card">
+    <div class="flex-row">
+      <div><span class="muted">Enrichers:</span> {{ enrichment.results|length if enrichment.results else 0 }}</div>
+      <div><span class="muted">Observables:</span> {{ observables|length }}</div>
+    </div>
+    {% if enrichment.results %}
+      <details style="margin-top:0.5rem">
+        <summary>Enricher results</summary>
+        <ul>
+        {% for res in enrichment.results %}
+          <li>
+            <strong>{{ res.module }}</strong>
+            {% if res.error %}<span style="color:#842029">error: {{ res.error }}</span>{% endif %}
+            <span class="muted">({{ (res.observables or [])|length }} observables)</span>
+          </li>
+        {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+  </article>
+</section>
+{% endif %}
+
+{% if observables %}
+<section>
+  <h3>Observables <span class="muted">({{ observables|length }})</span></h3>
+  <table>
+    <thead><tr><th>Type</th><th>Value</th><th>Source</th><th>First seen</th></tr></thead>
+    <tbody>
+      {% for o in observables %}
+      <tr>
+        <td><code>{{ o.type }}</code></td>
+        <td class="mono"><a href="/observables/{{ o.id }}">{{ o.value }}</a></td>
+        <td class="muted">{{ o.source }}</td>
+        <td class="muted">{{ o.first_seen|datetime }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if technique_matches %}
+<section>
+  <h3>Technique matches <span class="muted">({{ technique_matches|length }})</span></h3>
+  {% for tm in technique_matches %}
+  <article class="card" style="margin-bottom:0.5rem">
+    <header><strong>{{ tm.name or tm.technique_id }}</strong>
+      {% if tm.signature_type %}<span class="muted">· {{ tm.signature_type }}</span>{% endif %}
+      {% if tm.confidence %}<span class="muted">· confidence {{ "%.2f"|format(tm.confidence) }}</span>{% endif %}
+    </header>
+    {% if tm.description %}<p class="muted" style="margin:0.3rem 0">{{ tm.description }}</p>{% endif %}
+    {% if tm.evidence %}
+      <details class="json">
+        <summary>Evidence</summary>
+        <pre>{{ tm.evidence | tojson(indent=2) }}</pre>
+      </details>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if manifest and manifest.chain %}
+<section>
+  <h3>HAR chain</h3>
+  <article class="card">
+    <div class="flex-row">
+      <div><span class="muted">Chain requests:</span> {{ manifest.chain.chain_requests }}</div>
+      <div><span class="muted">Noise requests:</span> {{ manifest.chain.noise_requests }}</div>
+      <div><span class="muted">Technique hits:</span> {{ manifest.chain.technique_hit_count }}</div>
+    </div>
+  </article>
+</section>
+{% endif %}
+{% endblock %}

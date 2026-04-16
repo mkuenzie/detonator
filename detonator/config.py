@@ -35,9 +35,12 @@ class StorageConfig(BaseModel):
     db_path: str = "data/detonator.db"
 
 
-class AgentConfig(BaseModel):
-    """Configuration for communicating with the in-VM agent."""
+class AgentInstanceConfig(BaseModel):
+    """A named agent — pairs a VM + snapshot with the agent HTTP endpoint."""
 
+    name: str
+    vm_id: str
+    snapshot: str
     port: int = 8000
     health_timeout_sec: int = 60
     health_poll_sec: int = 2
@@ -51,22 +54,44 @@ class TimeoutsConfig(BaseModel):
     detonate_sec: int = 120
     collect_sec: int = 60
     enrich_sec: int = 120
+    filter_sec: int = 30
+
+
+class FilterConfig(BaseModel):
+    """Configuration for the HAR chain filter and technique detector."""
+
+    # Additional noise domains beyond the built-in defaults.
+    noise_domains: list[str] = []
+    # Additional resource types to classify as noise (supplements built-ins).
+    noise_resource_types: list[str] = []
 
 
 class DetonatorConfig(BaseModel):
     """Top-level configuration for the detonator host orchestrator."""
 
     vm_provider: VMProviderConfig = VMProviderConfig()
-    default_vm_id: str | None = None
-    default_snapshot: str | None = None
+    agents: list[AgentInstanceConfig] = []
     egress: dict[str, EgressConfig] = {}
     storage: StorageConfig = StorageConfig()
-    agent: AgentConfig = AgentConfig()
     timeouts: TimeoutsConfig = TimeoutsConfig()
     enrichment_modules: list[str] = Field(
         default=["whois", "dns", "tls", "favicon"]
     )
+    filter: FilterConfig = FilterConfig()
     log_level: str = "INFO"
+
+    def get_agent(self, name: str) -> AgentInstanceConfig:
+        """Look up an agent by name; raises KeyError if not found."""
+        for agent in self.agents:
+            if agent.name == name:
+                return agent
+        raise KeyError(f"No agent named {name!r} in config")
+
+    def default_agent(self) -> AgentInstanceConfig:
+        """Return the first configured agent; raises if none configured."""
+        if not self.agents:
+            raise RuntimeError("No agents configured — add an [[agents]] entry to config")
+        return self.agents[0]
 
 
 def load_config(path: str | Path) -> DetonatorConfig:

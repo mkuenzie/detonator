@@ -2,10 +2,23 @@
 
 from __future__ import annotations
 
+import uuid
 from abc import ABC, abstractmethod
 from typing import Any
 
 from pydantic import BaseModel
+
+from detonator.models.observables import Observable, ObservableLink
+
+# Stable namespace for deterministic observable UUIDs.
+# Using uuid5(namespace, "type:value") gives the same ID for the same indicator
+# across runs, which makes observable deduplication and link references reliable.
+_OBS_NS = uuid.UUID("7c9e6679-7425-40de-944b-e07fc1f90ae7")
+
+
+def observable_id(obs_type: str, value: str) -> uuid.UUID:
+    """Return a deterministic UUID for a (type, value) observable pair."""
+    return uuid.uuid5(_OBS_NS, f"{obs_type}:{value.lower().strip()}")
 
 
 class EnrichmentResult(BaseModel):
@@ -15,6 +28,8 @@ class EnrichmentResult(BaseModel):
     input_value: str
     data: dict[str, Any] = {}
     error: str | None = None
+    observables: list[Observable] = []
+    observable_links: list[ObservableLink] = []
 
 
 class RunContext(BaseModel):
@@ -24,6 +39,7 @@ class RunContext(BaseModel):
     artifact_dir: str
     seed_url: str
     domains: list[str] = []
+    ips: list[str] = []
     urls: list[str] = []
 
 

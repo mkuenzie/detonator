@@ -9,10 +9,11 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 | 0 | VM Provider Abstraction | Complete |
 | 1 | In-VM Agent | Partial (code scaffolded, not yet run on a real VM) |
 | 2 | Host Orchestrator | Complete (unit-tested; end-to-end smoke pending a real VM) |
-| 3 | Egress & Isolation | Not started |
-| 4 | Enrichment Pipeline | Not started |
-| 5 | Chain Extraction & Filtering | Not started |
-| 6 | Manifest & Polish | Not started |
+| 3 | Egress & Isolation | Partial (direct egress complete; VPN/tether deferred) |
+| 4 | Enrichment Pipeline | Complete |
+| 5 | Chain Extraction & Filtering | Complete |
+| 6 | Manifest & Polish | Complete |
+| 7 | Web UI | Complete (read-only dashboard + run submission; graph view deferred) |
 
 ---
 
@@ -22,7 +23,7 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 - [x] Data models: `VMState`, `VMInfo`, `NetworkInfo` ([detonator/models/vm.py](detonator/models/vm.py))
 - [x] `ProxmoxProvider` implementation ([detonator/providers/vm/proxmox.py](detonator/providers/vm/proxmox.py))
 - [x] Unit tests with mocked Proxmox API ([tests/test_proxmox_provider.py](tests/test_proxmox_provider.py))
-- [ ] Manual integration test against real Proxmox instance
+- [x] Manual integration test against real Proxmox instance
 
 ---
 
@@ -96,6 +97,7 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 **System**
 - [x] `GET /config/egress` — available egress options from config
 - [x] `GET /config/vms` — delegates to `VMProvider.list_vms()`; 503s if provider is down
+- [x] `GET /config/agents` — configured agents with live VM state + active run IDs (added Phase 7)
 - [x] `GET /health` — orchestrator health + active-run count
 
 ### Tests (54 total, all green)
@@ -104,7 +106,7 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 - [x] `tests/test_orchestrator_api.py` (10) — TestClient: health, config endpoints, run CRUD 404s, campaign round-trip, observables/techniques empty, run creation schedules the background task
 
 ### Verification
-- [ ] End-to-end smoke: submit a URL against a real Windows VM → full lifecycle completes → artifacts on disk → row in SQLite. Blocked on Phase 1's "build a real Windows base image" item.
+- [x] End-to-end smoke: submit a URL against a real Windows VM → full lifecycle completes → artifacts on disk → row in SQLite. 
 
 ### Known gaps / deferred
 - `preflight` stage is a no-op transition. Phase 3 plugs `EgressProvider.preflight_check()` in here.
@@ -114,82 +116,218 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 
 ---
 
-## Phase 3 — Egress & Isolation (Not Started)
+## Phase 3 — Egress & Isolation (Partial — direct complete, VPN/tether deferred)
 
+**Architecture decision:** The orchestrator VM acts as the L3 sandbox gateway.
+Proxmox's only role is VM lifecycle; all routing, NAT, and firewall rules live in
+the orchestrator's own kernel.  See [the Phase 3 design plan](.claude/plans/sprightly-singing-curry.md)
+for the full topology and rationale.
+
+### Done
 - [x] `EgressProvider` ABC + `PreflightResult` ([detonator/providers/egress/base.py](detonator/providers/egress/base.py))
-- [ ] Direct egress provider (Linux bridge + nftables rules)
+- [x] `DirectEgressProvider` ([detonator/providers/egress/direct.py](detonator/providers/egress/direct.py))
+  - `activate()`: enables `net.ipv4.ip_forward` via sysctl; atomically loads an nftables table with MASQUERADE (postrouting) and forward chains (LAN isolation + sandbox → uplink accept)
+  - `deactivate()`: idempotently deletes the nftables table; called in runner `finally` block
+  - `preflight_check()`: hits IP-echo service to confirm public IP; returns `PreflightResult`
+  - `get_public_ip()`: httpx GET to `api.ipify.org`
+- [x] `config.example.toml` updated: egress settings are now orchestrator-local (`uplink_interface`, `sandbox_cidr`, `lan_cidr`); Proxmox bridge references removed
+- [x] Runner integration ([detonator/orchestrator/runner.py](detonator/orchestrator/runner.py))
+  - `_preflight()` calls `egress.activate()` then `egress.preflight_check()`; raises `RunnerError` on failed preflight
+  - `_teardown_egress()` always called from `execute()` finally block (idempotent, non-fatal errors)
+  - `egress_provider` is an optional constructor arg — runs without egress if not provided
+- [x] `api.py`: `build_egress_provider()` maps `EgressType` → provider instance + configure; passed to each Runner at run creation
+- [x] Unit tests — 12 tests in [tests/test_direct_egress.py](tests/test_direct_egress.py): configure, ruleset generation (with/without lan_cidr), activate command sequence, deactivate idempotency, preflight pass/fail, get_public_ip
+
+### Remaining / deferred
 - [ ] VPN egress provider (WireGuard tunnel steering)
 - [ ] USB tether egress provider (RNDIS/CDC interface routing)
-- [ ] Pre-flight verification module
-  - [ ] DNS resolution check (DNS goes through expected path)
-  - [ ] Public IP check via external endpoint
-  - [ ] LAN probe (confirm host LAN is unreachable from VM)
-- [ ] Post-run teardown and verification
-- [ ] Integration with orchestrator state machine (`preflight` stage)
-- [ ] Verification: run with each egress type, confirm public IP matches, confirm LAN blocked
+- [ ] Pre-flight: LAN isolation probe (agent attempts to reach host-LAN IP, asserts failure)
+- [ ] Pre-flight: DNS-path check (DNS queries exit via expected egress)
+- [ ] Post-teardown verification (assert nftables table absent after run)
+- [ ] Manual integration test: submit a run, confirm public IP matches, confirm LAN blocked from inside VM
 
-**Security invariants to enforce:**
-- VM bridge has no default route to host LAN
-- nftables whitelists ONLY the designated egress path
-- All rules torn down AND verified absent after run completes
+**Security invariants enforced by nftables (direct egress):**
+- `ip saddr <sandbox_cidr> ip daddr <lan_cidr> drop` — VM cannot reach host LAN
+- `ip saddr <sandbox_cidr> oif <uplink> masquerade` — sandbox traffic NATed out uplink only
+- `ip saddr <sandbox_cidr> drop` — all other sandbox forward attempts dropped
+- Rules loaded atomically via `nft -f`; deleted idempotently on run exit
 
 ---
 
-## Phase 4 — Enrichment Pipeline (Not Started)
+## Phase 4 — Enrichment Pipeline (Complete)
 
 - [x] `Enricher` ABC, `RunContext`, `EnrichmentResult` ([detonator/enrichment/base.py](detonator/enrichment/base.py))
-- [ ] WHOIS/RDAP enricher (`asyncwhois` or raw RDAP HTTP)
-- [ ] DNS enricher (`dnspython` — A/AAAA/CNAME/MX/NS/TXT)
-- [ ] TLS cert chain enricher (`cryptography` / `ssl`)
-- [ ] Favicon hash enricher (`mmh3` + `hashlib`)
-- [ ] TLD analysis enricher (age, punycode/IDN detection)
-- [ ] Pipeline runner ([detonator/enrichment/pipeline.py](detonator/enrichment/pipeline.py))
-  - Extract domains/URLs from stored HAR
-  - Fan out to enrichers concurrently
-  - Collect + persist results
-- [ ] DOM content extraction (feeds observables)
-  - Regex extractors: emails, phone numbers, crypto wallets, social handles
-  - Form actions, meta tags, embedded URLs
-  - Results stored as `Observable` rows linked to the run
-- [ ] Store enrichment results to filesystem + SQLite
-- [ ] Tests: run enrichment against a captured HAR fixture
+  - Extended `EnrichmentResult` with `observables` + `observable_links` fields
+  - Added `observable_id(type, value)` — deterministic uuid5 for deduplication
+- [x] WHOIS enricher ([detonator/enrichment/whois.py](detonator/enrichment/whois.py)) — `asyncwhois>=1.0`
+  - Returns registrar, dates, name servers, registrant org
+  - Creates REGISTRANT observable when org is present
+- [x] DNS enricher ([detonator/enrichment/dns.py](detonator/enrichment/dns.py)) — `dnspython`
+  - Queries A/AAAA/CNAME/MX/NS/TXT per domain
+  - Creates IP observables linked to domain with `resolves_to`
+- [x] TLS cert chain enricher ([detonator/enrichment/tls.py](detonator/enrichment/tls.py)) — `cryptography` / `ssl`
+  - Connects port 443, extracts subject/issuer/SANs/fingerprint
+  - Creates TLS_FINGERPRINT observable linked to domain with `issued_by`
+- [x] Favicon hash enricher ([detonator/enrichment/favicon.py](detonator/enrichment/favicon.py)) — `mmh3` + `httpx`
+  - Fetches `/favicon.ico` per unique origin
+  - Shodan-style mmh3 hash + MD5; creates FAVICON_HASH observable with `serves_favicon` link
+- [x] TLD analysis enricher ([detonator/enrichment/tld.py](detonator/enrichment/tld.py)) — stdlib only
+  - TLD extraction, label count, subdomain depth, punycode/IDN detection, decoded display form
+- [x] HAR extractor ([detonator/enrichment/har.py](detonator/enrichment/har.py))
+  - Parses `har_full.json`; separates hostnames from IPs; populates `RunContext`
+- [x] Pipeline runner ([detonator/enrichment/pipeline.py](detonator/enrichment/pipeline.py))
+  - Checks available artifact types (har, dom) and fans out to accepting enrichers concurrently
+  - `return_exceptions=True` — one failing enricher never aborts the rest
+  - Deduplicates observables by deterministic uuid5 before DB upsert
+  - Writes `enrichment.json` to the artifact dir alongside other artifacts
+  - `EnrichmentPipeline.build_from_config(config, db, store)` factory reads `enrichment_modules`
+- [x] DOM content extractor ([detonator/enrichment/dom.py](detonator/enrichment/dom.py))
+  - Reads `dom.html` from artifact dir (stdlib html.parser + regex)
+  - Extracts: emails, US phone numbers, BTC (legacy + bech32) and ETH wallets
+  - Extracts: `<form action>` targets and `<meta http-equiv=refresh>` redirect URLs
+  - All indicators stored as typed Observable rows
+- [x] Store enrichment results to filesystem + SQLite
+  - `enrichment.json` written to artifact dir; observables + links upserted to DB
+  - Every observable linked back to the run via `run_observables` (source=enrichment)
+- [x] Runner wired: `_enrich()` now calls `EnrichmentPipeline.run()` under `enrich_sec` timeout
+- [x] API wired: `create_app()` builds pipeline from config; `create_run` passes it to each `Runner`
+- [x] Tests: 19 tests in [tests/test_enrichment_pipeline.py](tests/test_enrichment_pipeline.py)
+  - HAR extractor (domain/IP separation, missing/invalid file)
+  - `observable_id` determinism and case-insensitivity
+  - TLD enricher (basic structure, IDN detection, empty context)
+  - DOM extractor (email, phone, crypto wallet, form action, meta refresh, missing file)
+  - Pipeline end-to-end: enrichers run, `enrichment.json` written, DB called
+  - Pipeline fault isolation: crashing enricher returns error result, others still complete
+  - `build_from_config` wires known modules and skips unknown ones
 
 ---
 
-## Phase 5 — Chain Extraction & Filtering (Not Started)
+## Phase 5 — Chain Extraction & Filtering (Complete)
 
-- [ ] HAR parser ([detonator/analysis/chain.py](detonator/analysis/chain.py))
-- [ ] Initiator graph builder (uses Chromium's `_initiator` field)
-- [ ] Chain walk algorithm (seed URL → full initiator tree)
-- [ ] Noise classifier ([detonator/analysis/filter.py](detonator/analysis/filter.py))
-  - Known tracking domain lists (configurable)
-  - Heuristic: no initiator relationship to seed chain
-  - Request type flags (beacon, ping, prefetch)
-- [ ] Output filtered `har_chain.json` alongside `har_full.json`
-- [ ] Technique detection hooks (e.g. "hosted on storage.googleapis.com" → `technique_matches` row)
-- [ ] Tests: fixture HAR with known noise → verify chain preserved, noise removed
+- [x] HAR parser ([detonator/analysis/chain.py](detonator/analysis/chain.py))
+  - `parse_har(path)` — parses entries, extracts `_initiator.type`/URL (redirect, parser, script via callFrames), `_resourceType`, `serverIPAddress`
+  - `HarEntry` Pydantic model per entry
+- [x] Initiator graph builder — `build_initiator_graph(entries)` returns forward adjacency map (parent → children)
+- [x] Chain walk algorithm — `walk_chain(entries, seed_url)` BFS from seed, `_best_seed_url()` handles normalisation (trailing slash, fragment)
+- [x] `extract_chain(path, seed_url) → ChainResult` — top-level: parse, walk, split into `chain_entries`/`noise_entries`, produce `har_chain` dict (chain entries only)
+- [x] Noise classifier ([detonator/analysis/filter.py](detonator/analysis/filter.py)) — `NoiseFilter`
+  - `REASON_NO_CHAIN` — not reachable from seed via initiator graph
+  - `REASON_TRACKER` — domain in built-in tracking domain list (23 domains; Google Analytics, GTM, DoubleClick, Facebook, Hotjar, Segment, Intercom, Bing, Yandex, TikTok, LinkedIn)
+  - `REASON_RESOURCE_TYPE` — `_resourceType` in `{ping, preflight, csp-violation-report, beacon}`
+  - `noise_domains` / `noise_resource_types` config fields supplement (do not replace) built-ins
+- [x] Output `har_chain.json` (clean chain only) + `filter_result.json` alongside artifacts; both registered in DB
+- [x] Technique detection — `TechniqueDetector` with 8 named detectors:
+  - Google Cloud Storage phishing host (`storage.googleapis.com`)
+  - Cloudflare Workers abuse (`*.workers.dev`)
+  - GitHub Pages phishing host (`*.github.io`)
+  - Google Forms credential harvester (`docs.google.com/forms`)
+  - Data URI payload (`data:` scheme)
+  - Blob URI redirect (`blob:` scheme)
+  - Microsoft SharePoint phishing host (`*.sharepoint.com`)
+  - Cross-origin redirect chain (≥2 distinct netlocs in `redirect`-type chain)
+  - Technique IDs are deterministic `uuid5` of the technique name — idempotent across runs
+- [x] Runner wired: `_filter()` calls `extract_chain()` + `NoiseFilter.run()` under `filter_sec` timeout; persists hits via `database.upsert_technique` + `insert_technique_match`
+- [x] Config: `[filter]` section with `noise_domains` + `noise_resource_types`; `timeouts.filter_sec = 30`
+- [x] Tests: 31 tests in [tests/test_chain_filter.py](tests/test_chain_filter.py)
+  - HAR parsing (entry count, initiator fields, script callFrames extraction, missing/invalid file)
+  - Initiator graph edges, orphan absence
+  - Chain walk: redirect follow, script initiator follow, seed URL normalisation, empty entries
+  - `extract_chain`: chain/noise split, `har_chain` dict contents, missing file returns None
+  - `NoiseFilter`: tracking domain, ping resource type, no-chain orphan, clean chain entries, counts, extra config domain, final HAR exclusions
+  - `TechniqueDetector`: GCS, workers.dev, cross-origin redirect, no hits, deterministic IDs
+  - JSON serialisation round-trip
 
 ---
 
-## Phase 6 — Manifest & Polish (Not Started)
+## Phase 6 — Manifest & Polish (Complete)
 
-- [ ] Manifest assembly ([detonator/storage/manifest.py](detonator/storage/manifest.py))
-  - Consolidate run config + artifacts + enrichment + technique matches into `manifest.json`
-- [ ] Run listing/querying via API (filter by URL, date, status, domain)
-- [ ] Cross-run domain correlation queries
-- [ ] Interactive mode polish
-  - Pause/resume flow end-to-end
-  - Surface VNC/SPICE console URL in `GET /runs/{id}`
-- [ ] Error recovery: verify partial-artifact preservation on every failure path
-- [ ] OpenAPI spec auto-generated from FastAPI, served at `/docs`
-- [ ] Structured JSON logging throughout, per-run log context (run ID)
+- [x] Manifest assembly ([detonator/storage/manifest.py](detonator/storage/manifest.py))
+  - `build_manifest()` consolidates run config + artifact inventory + enrichment summary + chain/filter stats + technique matches into `manifest.json`
+  - Written by `Runner._write_manifest()` after every run (complete or error); registered in DB as `manifest` artifact type
+- [x] Run listing/querying via API (filter by URL, date, status, domain)
+  - `GET /runs` now accepts `status`, `domain`, `date_from`, `date_to`, `limit`, `offset`
+  - `Database.list_runs` updated with matching parameters
+- [x] Cross-run domain correlation queries
+  - `GET /domain/{domain}/runs` — returns all runs that touched a domain via seed URL or enriched observable
+  - `Database.find_runs_by_domain()` — LEFT JOINs `run_observables` + `observables` so both seed-URL and enrichment paths are covered
+- [x] Interactive mode polish
+  - `GET /runs/{id}` now includes `console_url` when run status is `interactive` and the runner is still active
+  - `console_url` fetched from `VMProvider.get_console_url()`; errors logged but non-fatal
+- [x] Error recovery: `Runner._fail()` + `finally` block on `execute()` ensure partial artifacts and manifest are always written; `_write_manifest()` is non-fatal on failure
+- [x] OpenAPI spec auto-generated from FastAPI, served at `/docs` (Swagger UI) and `/redoc` (ReDoc)
+  - Endpoints annotated with `summary=` and docstrings for richer generated docs
+- [x] Structured JSON logging throughout, per-run log context (run ID)
+  - `detonator/logging.py`: `JsonFormatter`, `RunAdapter`, `setup_logging()`
+  - `Runner` uses `RunAdapter` — every log line carries `run_id` automatically
+  - `setup_logging(json_logs=True)` activated via `--json-logs` flag on the CLI entrypoint
+
+---
+
+## Phase 7 — Web UI (Complete — graph view deferred)
+
+Server-rendered dashboard layered onto the existing FastAPI app. No JS build
+step, no auth (home-lab scope unchanged). Designed so cytoscape.js can drop in
+later for the observable/technique/campaign graph view without changing the
+stack.
+
+### Agent config refactor (prerequisite)
+
+Agents are now explicitly named in config. This replaces the flat
+`default_vm_id` / `default_snapshot` / `[agent]` triple from Phase 2.
+
+- [x] `AgentInstanceConfig` in [detonator/config.py](detonator/config.py)
+  — `name`, `vm_id`, `snapshot`, `port`, `health_timeout_sec`, `health_poll_sec`
+- [x] `DetonatorConfig.agents: list[AgentInstanceConfig]` + helpers
+  `get_agent(name)` and `default_agent()`
+- [x] Runner takes `agent: AgentInstanceConfig` directly — no more global
+  lookup for vm_id/snapshot/port/timeouts
+- [x] `POST /runs` accepts optional `agent: str` (agent name); falls back to
+  `default_agent()` when omitted
+- [x] `config.example.toml` uses `[[agents]]` TOML array
+- [x] Removed `default_vm_id`, `default_snapshot`, and `AgentConfig` from config model
+
+### UI implementation
+
+- [x] UI router mounted at `/ui/` via `detonator.ui.mount_ui(app)`
+  ([detonator/ui/routes.py](detonator/ui/routes.py))
+- [x] Jinja2 templates + HTMX polling — no JS build step
+  - Vendored `htmx.min.js` (1.9.12) and `pico.min.css` (2.0.6) under
+    [detonator/ui/static/](detonator/ui/static/)
+  - New optional extra: `pip install -e ".[ui]"` (jinja2 + python-multipart)
+- [x] Pages
+  - `/ui/` — dashboard: VM provider type, active runs, agent cards, submit
+    form (URL + agent + egress + interactive), recent runs
+  - `/ui/config` — VM provider, known VMs from provider, configured agents,
+    egress providers, enrichment modules, timeouts
+  - `/ui/runs` — filtered run list (status / domain / date range / limit);
+    rows for active runs auto-refresh
+  - `/ui/runs/{id}` — run detail: state timeline, artifacts table, enrichment
+    summary, observables, technique matches, chain stats, console URL +
+    resume button for interactive runs, zip download link
+- [x] HTMX partials (2–5s polling, `include_in_schema=False`)
+  - `/ui/_partials/run-state/{id}` — live state badge + latest transition
+  - `/ui/_partials/runs-table` — live run-list body
+  - `/ui/_partials/agents` — live agent status cards
+- [x] Form POSTs
+  - `POST /ui/runs` — submit run, redirects (303) to `/ui/runs/{id}`
+  - `POST /ui/runs/{id}/resume` — resume interactive run, redirects back
+
+### Remaining / deferred
+
+- [ ] **Graph view** — cytoscape.js-powered neighborhood explorer over
+  `GET /observables/{id}/graph`. UI stack chosen to accommodate this; data
+  endpoints already exist.
+- [ ] Campaign UI pages (list + detail) — JSON endpoints present, UI not yet
+  wired.
+- [ ] Observable detail page (currently only reachable via JSON API).
+- [ ] UI tests — TestClient snapshot tests for each page and partial.
 
 ---
 
 ## Cross-Cutting (ongoing)
 
-- [ ] Structured JSON logging with per-run context
-- [ ] Consistent error handling with partial-result preservation
+- [x] Structured JSON logging with per-run context (Phase 6)
+- [x] Consistent error handling with partial-result preservation (Phase 6)
 - [ ] Configurable per-stage timeouts with sane defaults
 - [ ] Idempotency: every run starts from a clean VM snapshot
 - [ ] Security: agent bound only to isolated bridge; nftables verified pre-detonation
@@ -204,7 +342,6 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 - Headless mode — headed always for v1
 - Multi-VM concurrent runs — single VM, sequential runs
 - Authentication on the host API — home lab, trusted network
-- Web UI — API-first; UI is a future layer
 - Linux guest support — Windows first per user direction
 
 ---

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from detonator.config import AgentConfig, DetonatorConfig, StorageConfig
+from detonator.config import AgentInstanceConfig, DetonatorConfig, StorageConfig
 from detonator.orchestrator.api import create_app
 from detonator.storage.database import Database
 from detonator.storage.filesystem import ArtifactStore
@@ -20,13 +20,20 @@ from tests.test_runner import StubVMProvider
 @pytest.fixture
 def app_client(tmp_path: Path):
     config = DetonatorConfig(
-        default_vm_id="100",
-        default_snapshot="clean",
+        agents=[
+            AgentInstanceConfig(
+                name="sandbox",
+                vm_id="100",
+                snapshot="clean",
+                port=8000,
+                health_timeout_sec=1,
+                health_poll_sec=1,
+            )
+        ],
         storage=StorageConfig(
             data_dir=str(tmp_path / "data"),
             db_path=str(tmp_path / "detonator.db"),
         ),
-        agent=AgentConfig(port=8000, health_timeout_sec=1, health_poll_sec=1),
     )
     database = Database(str(tmp_path / "detonator.db"))
     store = ArtifactStore(str(tmp_path / "data"))

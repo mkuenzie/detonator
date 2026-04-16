@@ -1,0 +1,25 @@
+{% if agents %}
+<div class="grid-cards">
+  {% for a in agents %}
+  <article class="card">
+    <header style="margin-bottom:0.5rem">
+      <strong>{{ a.name }}</strong>
+      <span class="status-badge {{ a.vm_state or 'unknown' }}">{{ a.vm_state or 'unknown' }}</span>
+    </header>
+    <div class="muted mono" style="font-size:0.85em">
+      vm_id <strong>{{ a.vm_id }}</strong> · snap <strong>{{ a.snapshot }}</strong><br>
+      port <strong>{{ a.port }}</strong> · health timeout {{ a.health_timeout_sec }}s
+    </div>
+    {% if a.active_run_ids %}
+      <div style="margin-top:0.4rem">
+        {% for rid in a.active_run_ids %}
+          <a href="/ui/runs/{{ rid }}" class="mono">active: {{ rid[:8] }}</a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+  <p class="muted">No agents configured.</p>
+{% endif %}

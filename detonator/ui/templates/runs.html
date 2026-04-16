@@ -1,0 +1,42 @@
+{% extends "_base.html" %}
+{% block title %}Runs · Detonator{% endblock %}
+
+{% block content %}
+<header style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem">
+  <h2 style="margin:0">Runs</h2>
+</header>
+
+<form method="get" action="/ui/runs" class="filters">
+  <label>Status
+    <select name="status">
+      <option value="">any</option>
+      {% for s in ["pending","provisioning","preflight","detonating","interactive","collecting","enriching","filtering","complete","error"] %}
+        <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Domain
+    <input type="text" name="domain" value="{{ filters.domain }}" placeholder="evil.com">
+  </label>
+  <label>From
+    <input type="date" name="date_from" value="{{ filters.date_from[:10] if filters.date_from else '' }}">
+  </label>
+  <label>To
+    <input type="date" name="date_to" value="{{ filters.date_to[:10] if filters.date_to else '' }}">
+  </label>
+  <label>Limit
+    <input type="number" name="limit" value="{{ filters.limit }}" min="1" max="500">
+  </label>
+  <button type="submit">Filter</button>
+  <a href="/ui/runs" role="button" class="secondary">Clear</a>
+</form>
+
+<div id="runs-table"
+     {% if runs|selectattr('is_active')|list %}
+       hx-get="/ui/_partials/runs-table?status={{ filters.status }}&domain={{ filters.domain }}&date_from={{ filters.date_from }}&date_to={{ filters.date_to }}&limit={{ filters.limit }}&offset={{ filters.offset }}"
+       hx-trigger="every 3s"
+       hx-swap="innerHTML"
+     {% endif %}>
+  {% include "_partials/runs_table.html" %}
+</div>
+{% endblock %}

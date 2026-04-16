@@ -1,0 +1,8 @@
+<span class="status-badge {{ run.status }}">{{ run.status }}</span>
+{% if is_active %}<span class="muted mono" style="font-size:0.85em">· live</span>{% endif %}
+{% if transitions %}
+  {% set latest = transitions[-1] %}
+  {% if latest.detail %}
+    <span class="muted mono" style="font-size:0.85em">· {{ latest.detail }}</span>
+  {% endif %}
+{% endif %}

@@ -142,14 +142,17 @@ Once everything is installed, auto-logon is configured, and the agent starts on 
 1. Reboot the VM and confirm the agent is reachable at `http://<vm-ip>:8000/health` without manual intervention.
 2. Shut down the VM cleanly.
 3. In Proxmox (or your hypervisor), take a snapshot named `clean`.
-4. Record the VM ID and snapshot name in your `config.toml`:
+4. Register the VM as a named agent in your host `config.toml`:
 
 ```toml
-default_vm_id = "100"
-default_snapshot = "clean"
+[[agents]]
+name     = "win11-sandbox"
+vm_id    = "100"
+snapshot = "clean"
+port     = 8000
 ```
 
-The orchestrator will revert to this snapshot before every detonation run.
+The orchestrator will revert to this snapshot before every detonation run. Declare additional `[[agents]]` entries for more sandbox VMs.
 
 ## Agent API Reference
 

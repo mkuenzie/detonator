@@ -1,6 +1,4 @@
 log_level = "INFO"
-default_vm_id = "100"
-default_snapshot = "clean"
 
 [vm_provider]
 type = "proxmox"
@@ -18,7 +16,13 @@ node = "pve"
 data_dir = "data"
 db_path = "data/detonator.db"
 
-[agent]
+# Agents are named bindings of a VM + snapshot to the in-VM agent's HTTP endpoint.
+# The first entry is the default used when a run doesn't specify an agent by name.
+# Add more entries to make additional sandbox images available for selection.
+[[agents]]
+name = "win11-sandbox"
+vm_id = "100"
+snapshot = "clean"
 port = 8000
 health_timeout_sec = 60
 health_poll_sec = 2
@@ -30,26 +34,47 @@ detonate_sec = 120
 collect_sec = 60
 enrich_sec = 120
 
+# Egress providers control how the agent VM reaches the internet.
+# The orchestrator acts as the L3 gateway between the sandbox network and the
+# upstream path — all routing, NAT, and firewall rules live in the orchestrator's
+# own kernel, not in Proxmox.  Proxmox only needs to put the agent VM on the
+# same L2 bridge as the orchestrator's sandbox NIC (ens19 / vmbr1).
+
 [egress.direct]
 type = "direct"
 
 [egress.direct.settings]
-bridge = "vmbr1"
-gateway = "192.168.1.1"
+# NIC on the orchestrator with internet access (LAN side).
+uplink_interface = "ens18"
+# CIDR of the sandbox network (orchestrator ens19 / agent VM).
+sandbox_cidr = "192.168.100.0/24"
+# LAN subnet to block from the sandbox (isolation invariant).
+lan_cidr = "192.168.1.0/24"
 
-[egress.vpn]
-type = "vpn"
-
-[egress.vpn.settings]
-bridge = "vmbr2"
-wg_interface = "wg0"
-wg_config = "/etc/wireguard/detonator.conf"
-
-[egress.tether]
-type = "tether"
-
-[egress.tether.settings]
-bridge = "vmbr3"
-usb_interface = "usb0"
+# VPN and tether egress providers are not yet implemented (Phase 3 deferred).
+# Uncomment and fill in once those providers land.
+#
+# [egress.vpn]
+# type = "vpn"
+#
+# [egress.vpn.settings]
+# uplink_interface = "wg0"
+# sandbox_cidr = "192.168.100.0/24"
+# lan_cidr = "192.168.1.0/24"
+# wg_config = "/etc/wireguard/detonator.conf"
+#
+# [egress.tether]
+# type = "tether"
+#
+# [egress.tether.settings]
+# uplink_interface = "usb0"
+# sandbox_cidr = "192.168.100.0/24"
+# lan_cidr = "192.168.1.0/24"
 
 enrichment_modules = ["whois", "dns", "tls", "favicon"]
+
+# HAR chain filter — controls which requests are written to har_chain.json.
+# noise_domains supplements (does not replace) the built-in tracker list.
+[filter]
+noise_domains = []
+noise_resource_types = []

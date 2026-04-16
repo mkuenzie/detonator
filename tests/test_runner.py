@@ -11,7 +11,12 @@ from unittest.mock import patch
 
 import pytest
 
-from detonator.config import AgentConfig, DetonatorConfig, StorageConfig, TimeoutsConfig
+from detonator.config import (
+    AgentInstanceConfig,
+    DetonatorConfig,
+    StorageConfig,
+    TimeoutsConfig,
+)
 from detonator.models import EgressType, NetworkInfo, RunConfig, RunState, VMInfo, VMState
 from detonator.orchestrator.runner import Runner
 from detonator.providers.vm.base import VMProvider
@@ -133,11 +138,17 @@ def _reset_fake_clients():
 @pytest.fixture
 async def setup(tmp_path):
     """Assembles a Runner with in-memory SQLite + tmpdir artifact store."""
+    agent = AgentInstanceConfig(
+        name="sandbox",
+        vm_id="100",
+        snapshot="clean",
+        port=8000,
+        health_timeout_sec=1,
+        health_poll_sec=1,
+    )
     config = DetonatorConfig(
-        default_vm_id="100",
-        default_snapshot="clean",
+        agents=[agent],
         storage=StorageConfig(data_dir=str(tmp_path / "data"), db_path=":memory:"),
-        agent=AgentConfig(port=8000, health_timeout_sec=1, health_poll_sec=1),
         timeouts=TimeoutsConfig(
             provision_sec=5, preflight_sec=5, detonate_sec=5, collect_sec=5, enrich_sec=5
         ),
@@ -152,6 +163,7 @@ async def setup(tmp_path):
     def _make_runner(**overrides):
         return Runner(
             config=config,
+            agent=overrides.get("agent", agent),
             vm_provider=vm,
             database=database,
             artifact_store=store,
@@ -160,6 +172,7 @@ async def setup(tmp_path):
 
     yield {
         "config": config,
+        "agent": agent,
         "database": database,
         "store": store,
         "vm": vm,
@@ -230,9 +243,10 @@ async def test_runner_fails_without_vm_ip(setup):
 
 
 async def test_runner_requires_vm_id_and_snapshot(setup, tmp_path):
-    config = setup["config"].model_copy(update={"default_vm_id": None, "default_snapshot": None})
+    agent = setup["agent"].model_copy(update={"vm_id": "", "snapshot": ""})
     runner = Runner(
-        config=config,
+        config=setup["config"],
+        agent=agent,
         vm_provider=setup["vm"],
         database=setup["database"],
         artifact_store=setup["store"],

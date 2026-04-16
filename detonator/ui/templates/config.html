@@ -1,0 +1,115 @@
+{% extends "_base.html" %}
+{% block title %}Config · Detonator{% endblock %}
+
+{% block content %}
+<header>
+  <h2>Configuration</h2>
+</header>
+
+<section>
+  <h3>VM provider</h3>
+  <article class="card">
+    <p><strong>Type:</strong> {{ vm_provider.type }}</p>
+    {% if vm_provider.settings %}
+      <details>
+        <summary>Connection settings</summary>
+        <dl>
+          {% for k, v in vm_provider.settings.items() %}
+            <dt class="mono">{{ k }}</dt>
+            <dd class="mono">{% if 'token' in k or 'secret' in k or 'password' in k %}••••••••{% else %}{{ v }}{% endif %}</dd>
+          {% endfor %}
+        </dl>
+      </details>
+    {% endif %}
+  </article>
+
+  <h4>Known VMs</h4>
+  {% if vm_error %}
+    <article class="card" style="border-left:3px solid var(--pico-del-color)">
+      <strong>Provider unreachable:</strong>
+      <span class="mono">{{ vm_error }}</span>
+    </article>
+  {% elif vms %}
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Name</th><th>State</th><th>IP</th><th>Snapshots</th></tr>
+      </thead>
+      <tbody>
+        {% for vm in vms %}
+          <tr>
+            <td class="mono">{{ vm.vm_id }}</td>
+            <td>{{ vm.name }}</td>
+            <td><span class="status-badge {{ vm.state }}">{{ vm.state }}</span></td>
+            <td class="mono">{{ (vm.network.ip_address if vm.network else '') or '—' }}</td>
+            <td class="mono muted">{{ vm.snapshots|join(', ') or '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No VMs returned.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Agents</h3>
+  {% if agents %}
+    <div class="grid-cards">
+      {% for a in agents %}
+      <article class="card">
+        <header><strong>{{ a.name }}</strong>
+          <span class="status-badge {{ a.vm_state or 'unknown' }}">{{ a.vm_state or 'unknown' }}</span>
+        </header>
+        <dl style="margin:0.5rem 0 0 0">
+          <dt class="muted">VM</dt><dd class="mono">{{ a.vm_id }}</dd>
+          <dt class="muted">Snapshot</dt><dd class="mono">{{ a.snapshot }}</dd>
+          <dt class="muted">Port</dt><dd class="mono">{{ a.port }}</dd>
+          <dt class="muted">Health timeout</dt><dd class="mono">{{ a.health_timeout_sec }}s</dd>
+          <dt class="muted">Health poll</dt><dd class="mono">{{ a.health_poll_sec }}s</dd>
+        </dl>
+      </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No agents configured. Add an <code>[[agents]]</code> entry to your config.toml.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Egress providers</h3>
+  {% if egress %}
+    <div class="grid-cards">
+      {% for name, cfg in egress.items() %}
+      <article class="card">
+        <header><strong>{{ name }}</strong> <span class="muted">({{ cfg.type }})</span></header>
+        <dl style="margin:0.5rem 0 0 0">
+          {% for k, v in cfg.settings.items() %}
+            <dt class="muted mono">{{ k }}</dt>
+            <dd class="mono">{{ v }}</dd>
+          {% endfor %}
+        </dl>
+      </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No egress providers configured.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h3>Pipeline</h3>
+  <article class="card">
+    <p><strong>Enrichment modules:</strong>
+      {% for m in enrichment_modules %}
+        <code>{{ m }}</code>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </p>
+    <p><strong>Timeouts:</strong></p>
+    <dl class="mono">
+      {% for k, v in timeouts.items() %}
+        <dt class="muted">{{ k }}</dt><dd>{{ v }}s</dd>
+      {% endfor %}
+    </dl>
+  </article>
+</section>
+{% endblock %}
