@@ -31,7 +31,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from detonator.config import DetonatorConfig
+from detonator.config import DetonatorConfig, EnrichmentConfig
 from detonator.enrichment.base import Enricher, EnrichmentResult, RunContext
 from detonator.enrichment.har import extract_from_har
 from detonator.models.observables import Observable, ObservableLink, ObservableSource, ObservableType
@@ -266,15 +266,15 @@ class EnrichmentPipeline:
         database: Database,
         artifact_store: ArtifactStore,
     ) -> EnrichmentPipeline:
-        """Instantiate an ``EnrichmentPipeline`` from ``config.enrichment_modules``.
+        """Instantiate an ``EnrichmentPipeline`` from ``config.enrichment.modules``.
 
         Unknown module names are logged and skipped so a typo in config doesn't
         crash the orchestrator at startup.
         """
         enrichers: list[Enricher] = []
 
-        for module_name in config.enrichment_modules:
-            enricher = _build_enricher(module_name)
+        for module_name in config.enrichment.modules:
+            enricher = _build_enricher(module_name, config.enrichment)
             if enricher is not None:
                 enrichers.append(enricher)
             else:
@@ -288,23 +288,23 @@ class EnrichmentPipeline:
         return cls(enrichers=enrichers, database=database, artifact_store=artifact_store)
 
 
-def _build_enricher(name: str) -> Enricher | None:
+def _build_enricher(name: str, cfg: EnrichmentConfig) -> Enricher | None:
     """Instantiate a single enricher by name. Returns None if unrecognised."""
     if name == "whois":
         from detonator.enrichment.whois import WhoisEnricher
-        return WhoisEnricher()
+        return WhoisEnricher(exclude_hosts=cfg.whois.exclude_hosts)
     if name == "dns":
         from detonator.enrichment.dns import DnsEnricher
-        return DnsEnricher()
+        return DnsEnricher(exclude_hosts=cfg.dns.exclude_hosts)
     if name == "tls":
         from detonator.enrichment.tls import TlsEnricher
-        return TlsEnricher()
+        return TlsEnricher(exclude_hosts=cfg.tls.exclude_hosts)
     if name == "favicon":
         from detonator.enrichment.favicon import FaviconEnricher
-        return FaviconEnricher()
+        return FaviconEnricher(exclude_hosts=cfg.favicon.exclude_hosts)
     if name == "tld":
         from detonator.enrichment.tld import TldEnricher
-        return TldEnricher()
+        return TldEnricher(exclude_hosts=cfg.tld.exclude_hosts)
     if name == "dom":
         from detonator.enrichment.dom import DomExtractor
         return DomExtractor()

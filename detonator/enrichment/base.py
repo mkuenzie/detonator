@@ -51,6 +51,17 @@ class Enricher(ABC):
     enrichers whose accepts() returns True.
     """
 
+    def __init__(self, exclude_hosts: list[str] | None = None) -> None:
+        self._exclude_hosts: set[str] = {
+            h.lower().strip() for h in (exclude_hosts or []) if h.strip()
+        }
+
+    def _is_host_excluded(self, host: str) -> bool:
+        host = host.lower().strip().removeprefix("www.")
+        if host in self._exclude_hosts:
+            return True
+        return any(host.endswith(f".{d}") for d in self._exclude_hosts)
+
     @property
     @abstractmethod
     def name(self) -> str:

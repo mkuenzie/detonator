@@ -30,7 +30,11 @@ class TldEnricher(Enricher):
         return artifact_type == "domain"
 
     async def enrich(self, context: RunContext) -> list[EnrichmentResult]:
-        return [self._analyse(domain) for domain in context.domains]
+        domains = [d for d in context.domains if not self._is_host_excluded(d)]
+        skipped = len(context.domains) - len(domains)
+        if skipped:
+            logger.debug("tld: skipped %d excluded domains", skipped)
+        return [self._analyse(domain) for domain in domains]
 
     def _analyse(self, domain: str) -> EnrichmentResult:
         labels = domain.lower().rstrip(".").split(".")

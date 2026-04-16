@@ -13,12 +13,14 @@
        hx-target="#run-state"
        hx-swap="innerHTML"></div>
   {% endif %}
+  {% if is_terminal %}
   <div style="margin-left:auto">
     <button class="btn-delete-run"
             hx-delete="/runs/{{ run.id }}"
             hx-confirm="Delete run {{ run.id[:8] }}? This cannot be undone."
             hx-on::after-request="if(event.detail.successful) window.location='/ui/runs'">Delete run</button>
   </div>
+  {% endif %}
 </header>
 
 <section>

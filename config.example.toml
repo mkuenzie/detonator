@@ -1,5 +1,4 @@
 log_level = "INFO"
-enrichment_modules = ["whois", "dns", "tls", "favicon"]
 
 [vm_provider]
 type = "proxmox"
@@ -77,3 +76,45 @@ lan_cidr = "192.168.1.0/24"
 [filter]
 noise_domains = []
 noise_resource_types = []
+
+# Enrichment pipeline — controls which modules run and per-enricher exclusions.
+# Host entries match exactly OR as a "*.<host>" suffix (e.g. "googleapis.com"
+# also excludes "fonts.googleapis.com"). Exclusions are PER-ENRICHER: a host
+# excluded from whois still runs through dns/tls/favicon unless listed there too.
+[enrichment]
+modules = ["whois", "dns", "tls", "favicon"]
+
+# CDN/cloud/SaaS registrants are always the provider, never the adversary.
+[enrichment.whois]
+exclude_hosts = [
+  "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
+  "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
+  "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
+  "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+]
+
+# Same set — anycast ranges resolve to known provider blocks, low signal.
+[enrichment.dns]
+exclude_hosts = [
+  "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
+  "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
+  "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
+  "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+]
+
+# Narrower — only shared-tenant CDNs where the leaf cert is the provider's.
+# Per-tenant certs on amazonaws.com/cloudfront.net do carry signal; keep those.
+[enrichment.tls]
+exclude_hosts = [
+  "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com",
+  "googleapis.com", "gstatic.com",
+]
+
+# CDN origins don't serve a meaningful /favicon.ico.
+[enrichment.favicon]
+exclude_hosts = [
+  "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
+  "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
+  "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
+  "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+]

@@ -335,10 +335,10 @@ async def test_pipeline_failing_enricher_does_not_abort(tmp_path: Path) -> None:
 
 def test_pipeline_build_from_config() -> None:
     """build_from_config wires known module names and skips unknowns."""
-    from detonator.config import DetonatorConfig
+    from detonator.config import DetonatorConfig, EnrichmentConfig
     from detonator.enrichment.pipeline import EnrichmentPipeline
 
-    cfg = DetonatorConfig(enrichment_modules=["tld", "dom", "nonexistent_module"])
+    cfg = DetonatorConfig(enrichment=EnrichmentConfig(modules=["tld", "dom", "nonexistent_module"]))
     mock_db = MagicMock()
     mock_store = MagicMock()
 
@@ -348,3 +348,72 @@ def test_pipeline_build_from_config() -> None:
     assert "tld" in names
     assert "dom" in names
     assert "nonexistent_module" not in names
+
+
+# ── Exclusion tests ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_tld_enricher_excludes_config_host() -> None:
+    """Config-supplied exclude_hosts are filtered from TLD enricher."""
+    from detonator.enrichment.tld import TldEnricher
+
+    enricher = TldEnricher(exclude_hosts=["cdn.example.com"])
+    ctx = RunContext(run_id="r1", artifact_dir="/tmp", seed_url="https://evil.example.com")
+    ctx.domains = ["evil.example.com", "cdn.example.com"]
+
+    results = await enricher.enrich(ctx)
+    assert len(results) == 1
+    assert results[0].input_value == "evil.example.com"
+
+
+@pytest.mark.asyncio
+async def test_exclusion_suffix_match() -> None:
+    """Listing googleapis.com excludes fonts.googleapis.com but not googleapis.com.attacker.com."""
+    from detonator.enrichment.tld import TldEnricher
+
+    enricher = TldEnricher(exclude_hosts=["googleapis.com"])
+    ctx = RunContext(run_id="r1", artifact_dir="/tmp", seed_url="https://attacker.com")
+    ctx.domains = ["fonts.googleapis.com", "googleapis.com.attacker.com", "attacker.com"]
+
+    results = await enricher.enrich(ctx)
+    values = {r.input_value for r in results}
+
+    # suffix match: fonts.googleapis.com is excluded
+    assert "fonts.googleapis.com" not in values
+    # tricky: attacker.com domain does NOT end with .googleapis.com
+    assert "googleapis.com.attacker.com" in values
+    assert "attacker.com" in values
+
+
+@pytest.mark.asyncio
+async def test_exclusion_per_enricher_independence() -> None:
+    """Excluding a host from whois does not exclude it from tld."""
+    from detonator.enrichment.tld import TldEnricher
+    from detonator.enrichment.whois import WhoisEnricher
+
+    whois = WhoisEnricher(exclude_hosts=["cdn.example.com"])
+    tld = TldEnricher(exclude_hosts=[])
+
+    assert whois._is_host_excluded("cdn.example.com")
+    assert not tld._is_host_excluded("cdn.example.com")
+
+
+def test_exclude_hosts_from_config_applied() -> None:
+    """Hosts supplied via exclude_hosts are excluded; others are not."""
+    from detonator.enrichment.whois import WhoisEnricher
+
+    enricher = WhoisEnricher(exclude_hosts=["jsdelivr.net", "cloudflare.com"])
+
+    assert enricher._is_host_excluded("jsdelivr.net")
+    assert enricher._is_host_excluded("cdn.jsdelivr.net")
+    assert not enricher._is_host_excluded("evil.example.com")
+
+
+def test_empty_exclude_hosts_excludes_nothing() -> None:
+    """With an empty list nothing is excluded."""
+    from detonator.enrichment.whois import WhoisEnricher
+
+    enricher = WhoisEnricher(exclude_hosts=[])
+    assert not enricher._is_host_excluded("jsdelivr.net")
+    assert not enricher._is_host_excluded("evil.example.com")

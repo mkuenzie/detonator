@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -66,17 +66,34 @@ class FilterConfig(BaseModel):
     noise_resource_types: list[str] = []
 
 
+class EnricherConfig(BaseModel):
+    """Per-enricher settings. Kept minimal; add fields as needs surface."""
+
+    exclude_hosts: list[str] = []
+
+
+class EnrichmentConfig(BaseModel):
+    """Enrichment pipeline configuration."""
+
+    modules: list[str] = Field(default=["whois", "dns", "tls", "favicon"])
+    whois: EnricherConfig = EnricherConfig()
+    dns: EnricherConfig = EnricherConfig()
+    tls: EnricherConfig = EnricherConfig()
+    favicon: EnricherConfig = EnricherConfig()
+    tld: EnricherConfig = EnricherConfig()
+
+
 class DetonatorConfig(BaseModel):
     """Top-level configuration for the detonator host orchestrator."""
+
+    model_config = ConfigDict(extra="forbid")
 
     vm_provider: VMProviderConfig = VMProviderConfig()
     agents: list[AgentInstanceConfig] = []
     egress: dict[str, EgressConfig] = {}
     storage: StorageConfig = StorageConfig()
     timeouts: TimeoutsConfig = TimeoutsConfig()
-    enrichment_modules: list[str] = Field(
-        default=["whois", "dns", "tls", "favicon"]
-    )
+    enrichment: EnrichmentConfig = EnrichmentConfig()
     filter: FilterConfig = FilterConfig()
     log_level: str = "INFO"
 

@@ -32,7 +32,11 @@ class WhoisEnricher(Enricher):
         return artifact_type == "domain"
 
     async def enrich(self, context: RunContext) -> list[EnrichmentResult]:
-        if not context.domains:
+        domains = [d for d in context.domains if not self._is_host_excluded(d)]
+        skipped = len(context.domains) - len(domains)
+        if skipped:
+            logger.debug("whois: skipped %d excluded domains", skipped)
+        if not domains:
             return []
 
         try:
@@ -46,11 +50,11 @@ class WhoisEnricher(Enricher):
                 )
             ]
 
-        tasks = [self._lookup(domain) for domain in context.domains]
+        tasks = [self._lookup(domain) for domain in domains]
         raw = await asyncio.gather(*tasks, return_exceptions=True)
 
         results: list[EnrichmentResult] = []
-        for domain, outcome in zip(context.domains, raw):
+        for domain, outcome in zip(domains, raw):
             if isinstance(outcome, Exception):
                 results.append(
                     EnrichmentResult(

@@ -50,7 +50,14 @@ class FaviconEnricher(Enricher):
         return artifact_type in ("url", "domain")
 
     async def enrich(self, context: RunContext) -> list[EnrichmentResult]:
-        origins = _unique_origins(context.urls, context.seed_url)
+        all_origins = _unique_origins(context.urls, context.seed_url)
+        if not all_origins:
+            return []
+
+        origins = [o for o in all_origins if not self._is_host_excluded(urlparse(o).hostname or "")]
+        skipped = len(all_origins) - len(origins)
+        if skipped:
+            logger.debug("favicon: skipped %d excluded origins", skipped)
         if not origins:
             return []
 
