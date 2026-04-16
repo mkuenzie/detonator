@@ -174,7 +174,7 @@ for the full topology and rationale.
 - [x] TLD analysis enricher ([detonator/enrichment/tld.py](detonator/enrichment/tld.py)) — stdlib only
   - TLD extraction, label count, subdomain depth, punycode/IDN detection, decoded display form
 - [x] HAR extractor ([detonator/enrichment/har.py](detonator/enrichment/har.py))
-  - Parses `har_full.json`; separates hostnames from IPs; populates `RunContext`
+  - Parses `har_full.har`; separates hostnames from IPs; populates `RunContext`
 - [x] Pipeline runner ([detonator/enrichment/pipeline.py](detonator/enrichment/pipeline.py))
   - Checks available artifact types (har, dom) and fans out to accepting enrichers concurrently
   - `return_exceptions=True` — one failing enricher never aborts the rest

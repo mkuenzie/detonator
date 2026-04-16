@@ -74,7 +74,7 @@ _DOM_FIXTURE = """<!DOCTYPE html>
 
 
 def test_extract_from_har_domains_and_ips(tmp_path: Path) -> None:
-    har_path = tmp_path / "har_full.json"
+    har_path = tmp_path / "har_full.har"
     har_path.write_text(json.dumps(_HAR_FIXTURE), encoding="utf-8")
 
     domains, ips, urls = extract_from_har(har_path)
@@ -245,7 +245,7 @@ async def test_dom_extractor_missing_file(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_pipeline_runs_enrichers_and_writes_json(tmp_path: Path) -> None:
     """Pipeline fans out to TLD + DOM enrichers against fixture artifacts."""
-    (tmp_path / "har_full.json").write_text(json.dumps(_HAR_FIXTURE), encoding="utf-8")
+    (tmp_path / "har_full.har").write_text(json.dumps(_HAR_FIXTURE), encoding="utf-8")
     (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
 
     mock_db = MagicMock()
@@ -301,7 +301,7 @@ async def test_pipeline_no_artifacts(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_pipeline_failing_enricher_does_not_abort(tmp_path: Path) -> None:
     """A crash in one enricher should not abort the other enrichers."""
-    (tmp_path / "har_full.json").write_text(json.dumps(_HAR_FIXTURE), encoding="utf-8")
+    (tmp_path / "har_full.har").write_text(json.dumps(_HAR_FIXTURE), encoding="utf-8")
     (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
 
     mock_db = MagicMock()

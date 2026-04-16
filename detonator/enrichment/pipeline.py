@@ -12,7 +12,7 @@ Then call it from the runner's ``_enrich()`` stage::
 
 The pipeline:
 
-1. Scans *artifact_dir* for a ``har_full.json`` to extract domains / IPs / URLs.
+1. Scans *artifact_dir* for a ``har_full.har`` to extract domains / IPs / URLs.
 2. Also checks for ``dom.html`` so the DOM extractor can run.
 3. Determines which artifact types are available and fans out to all enrichers
    whose ``accepts()`` returns True for any available type.
@@ -119,7 +119,7 @@ class EnrichmentPipeline:
         ips: list[str] = []
         urls: list[str] = []
 
-        har_path = Path(artifact_dir) / "har_full.json"
+        har_path = Path(artifact_dir) / "har_full.har"
         if har_path.exists():
             domains, ips, urls = extract_from_har(har_path)
             logger.info(
@@ -127,7 +127,7 @@ class EnrichmentPipeline:
                 run_id, len(domains), len(ips), len(urls),
             )
         else:
-            logger.debug("run=%s har_full.json not found, context will have empty domain/URL lists", run_id)
+            logger.debug("run=%s har_full.har not found, context will have empty domain/URL lists", run_id)
 
         return RunContext(
             run_id=run_id,
@@ -142,7 +142,7 @@ class EnrichmentPipeline:
     def _available_artifact_types(artifact_dir: Path) -> list[str]:
         """Return the list of artifact types present in the run directory."""
         types: list[str] = []
-        if (artifact_dir / "har_full.json").exists():
+        if (artifact_dir / "har_full.har").exists():
             types.extend(["har", "domain", "url"])
         if (artifact_dir / "dom.html").exists():
             types.append("dom")

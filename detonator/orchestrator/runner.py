@@ -421,9 +421,9 @@ class Runner:
 
         from pathlib import Path
 
-        har_path = Path(artifact_dir) / "har_full.json"
+        har_path = Path(artifact_dir) / "har_full.har"
         if not har_path.exists():
-            await self._transition(RunState.FILTERING, "no har_full.json — skipping")
+            await self._transition(RunState.FILTERING, "no har_full.har — skipping")
             return
 
         await self._transition(RunState.FILTERING)

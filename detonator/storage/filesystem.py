@@ -18,7 +18,7 @@ class ArtifactStore:
         {base_dir}/
           runs/
             {run-id}/
-              har_full.json
+              har_full.har
               har_chain.json
               screenshots/
               dom.html

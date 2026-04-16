@@ -159,7 +159,7 @@ _NOISE_URLS = {
 
 
 def _write_har(tmp_path: Path, data: dict | None = None) -> Path:
-    har_path = tmp_path / "har_full.json"
+    har_path = tmp_path / "har_full.har"
     har_path.write_text(json.dumps(data or _HAR_FIXTURE), encoding="utf-8")
     return har_path
 

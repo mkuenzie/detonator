@@ -43,6 +43,8 @@ $EDITOR config.toml
 
 ```toml
 log_level = "INFO"           # DEBUG, INFO, WARNING, ERROR
+enrichment_modules = ["whois", "dns", "tls", "favicon"]
+
 
 [vm_provider]
 type = "proxmox"
@@ -97,7 +99,12 @@ gateway = "192.168.1.1"
 # Optional: VPN and tether entries follow the same pattern.
 # See config.example.toml for examples.
 
-enrichment_modules = ["whois", "dns", "tls", "favicon"]
+# HAR chain filter — controls which requests are written to har_chain.json.
+# noise_domains supplements (does not replace) the built-in tracker list.
+[filter]
+noise_domains = []
+noise_resource_types = []
+
 ```
 
 ## Proxmox API Token Setup

@@ -1,6 +1,6 @@
 """HAR artifact extractor.
 
-Parses a captured ``har_full.json`` file and returns the unique domains, IPs,
+Parses a captured ``har_full.har`` file and returns the unique domains, IPs,
 and URLs seen across all entries.  The pipeline calls this first to populate
 ``RunContext`` before fanning out to enrichers.
 """

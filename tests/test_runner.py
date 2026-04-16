@@ -72,7 +72,7 @@ class FakeAgentClient:
         self.base_url = base_url
         self._statuses = statuses or ["running", "complete"]
         self._idx = 0
-        self._artifacts = artifacts or {"har_full.json": b'{"log":{}}'}
+        self._artifacts = artifacts or {"har_full.har": b'{"log":{}}'}
         self._health_ok = health_ok
         self.detonate_calls: list[dict] = []
         self.resumed = False
@@ -202,7 +202,7 @@ async def test_runner_happy_path(setup):
     # Artifact was downloaded + indexed
     artifacts = await setup["database"].get_artifacts(str(runner.run_id))
     names = {Path(a["path"]).name for a in artifacts}
-    assert "har_full.json" in names
+    assert "har_full.har" in names
     assert "meta.json" in names  # runner always dumps its meta snapshot
 
     # State transitions include all the major phases

@@ -113,7 +113,7 @@ async def test_wait_for_terminal_pauses_on_interactive():
 
 async def test_download_all_writes_files(tmp_path: Path):
     files = {
-        "har_full.json": b'{"log": {}}',
+        "har_full.har": b'{"log": {}}',
         "dom.html": b"<html></html>",
         "screenshots/final.png": b"\x89PNG\r\n",
     }
