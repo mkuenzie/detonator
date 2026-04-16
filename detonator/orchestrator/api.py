@@ -374,10 +374,22 @@ def _register_routes(app: FastAPI) -> None:
         runner = deps.get_runner(run_id)
         if runner is not None:
             raise HTTPException(409, "Cannot delete an active run")
+        # Capture hashes BEFORE the cascade delete so we can probe orphans after.
+        candidate_hashes = {
+            a["content_hash"]
+            for a in await deps.database.get_artifacts(str(run_id))
+            if a.get("content_hash")
+        }
         removed = await deps.database.delete_run(str(run_id))
         if not removed:
             raise HTTPException(404, f"Run {run_id} not found")
-        deps.artifact_store.delete_run(str(run_id))
+        deps.artifact_store.delete_run(str(run_id))  # removes symlinks only
+        # Probe refcounts AFTER cascade so this run's rows no longer count.
+        orphaned = [
+            h for h in candidate_hashes
+            if await deps.database.count_artifacts_by_hash(h) == 0
+        ]
+        deps.artifact_store.delete_blobs(orphaned)
         return {"run_id": str(run_id), "deleted": True}
 
     # ── Campaigns ────────────────────────────────────────────────

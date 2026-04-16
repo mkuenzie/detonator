@@ -353,11 +353,13 @@ class Runner:
         for name, path, size in downloaded:
             source_url = body_map.get(Path(name).name)
             artifact_type = self._infer_artifact_type(name, source_url=source_url)
-            content_hash = ArtifactStore._sha256(path)
+            symlink_path, size, content_hash = self.artifact_store.adopt(
+                str(self.record.id), name, path
+            )
             await self.database.insert_artifact(
                 str(self.record.id),
                 artifact_type,
-                str(path),
+                str(symlink_path),
                 size=size,
                 content_hash=content_hash,
                 source_url=source_url,

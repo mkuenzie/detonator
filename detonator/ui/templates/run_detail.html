@@ -13,6 +13,12 @@
        hx-target="#run-state"
        hx-swap="innerHTML"></div>
   {% endif %}
+  <div style="margin-left:auto">
+    <button class="btn-delete-run"
+            hx-delete="/runs/{{ run.id }}"
+            hx-confirm="Delete run {{ run.id[:8] }}? This cannot be undone."
+            hx-on::after-request="if(event.detail.successful) window.location='/ui/runs'">Delete run</button>
+  </div>
 </header>
 
 <section>
@@ -140,7 +146,7 @@
         <ul>
         {% for res in enrichment.results %}
           <li>
-            <strong>{{ res.module }}</strong>
+            <strong>{{ res.enricher }}</strong><span class="muted"> {{ res.input_value }}</span>
             {% if res.error %}<span style="color:#842029">error: {{ res.error }}</span>{% endif %}
             <span class="muted">({{ (res.observables or [])|length }} observables)</span>
           </li>
@@ -162,7 +168,7 @@
       <tr>
         <td><code>{{ o.type }}</code></td>
         <td class="mono"><a href="/observables/{{ o.id }}">{{ o.value }}</a></td>
-        <td class="muted">{{ o.source }}</td>
+        <td class="muted">{{ o.enricher }}</td>
         <td class="muted">{{ o.first_seen|datetime }}</td>
       </tr>
       {% endfor %}

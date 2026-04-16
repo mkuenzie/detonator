@@ -135,6 +135,58 @@ def test_techniques_empty(app_client):
     assert resp.json() == []
 
 
+def test_delete_run_blob_gc(app_client):
+    """Deleting a run GCs blobs only when no other run references them.
+
+    Run-A and run-B share one artifact (same bytes). After deleting run-A the
+    blob must still exist (run-B holds a reference). After deleting run-B the
+    blob must be gone and its prefix dir pruned.
+    """
+    import asyncio
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from detonator.storage.database import Database
+
+    client, database, store = app_client
+
+    run_a, run_b = str(uuid4()), str(uuid4())
+    shared_data = b"shared artifact bytes"
+    now = datetime.now(UTC).isoformat()
+
+    # Store the SAME bytes for both runs (sync — no event loop needed).
+    path_a, size_a, sha = store.store_bytes(run_a, "meta.json", shared_data)
+    path_b, size_b, _ = store.store_bytes(run_b, "meta.json", shared_data)
+
+    # Seed the DB via a separate connection in a fresh event loop so we don't
+    # interfere with the app's aiosqlite connection (which lives on the
+    # TestClient's internal thread event loop).
+    async def seed():
+        db = Database(database._path)
+        await db.connect()
+        await db.insert_run(run_a, "https://a.example.com", "direct", {}, now)
+        await db.insert_run(run_b, "https://b.example.com", "direct", {}, now)
+        await db.insert_artifact(run_a, "meta", str(path_a), size=size_a, content_hash=sha)
+        await db.insert_artifact(run_b, "meta", str(path_b), size=size_b, content_hash=sha)
+        await db.close()
+
+    asyncio.run(seed())
+
+    blob = store.base_dir / "blobs" / sha[:2] / sha[2:]
+    assert blob.exists(), "blob must exist before any deletions"
+
+    # Delete run-A — blob must survive (run-B still references it).
+    resp = client.delete(f"/runs/{run_a}")
+    assert resp.status_code == 200
+    assert blob.exists(), "blob must survive while run-B still references it"
+
+    # Delete run-B — blob must now be gone.
+    resp = client.delete(f"/runs/{run_b}")
+    assert resp.status_code == 200
+    assert not blob.exists(), "blob must be GC'd once no run references it"
+    assert not blob.parent.exists(), "empty prefix dir must be pruned"
+
+
 def test_create_run_persists_and_schedules(app_client, monkeypatch):
     client, database, store = app_client
 

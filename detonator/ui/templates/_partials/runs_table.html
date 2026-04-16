@@ -18,7 +18,14 @@
       <td>{{ r.egress_type }}</td>
       <td class="muted">{{ r.created_at|datetime }}</td>
       <td class="muted">{{ r.created_at|duration(r.completed_at) }}</td>
-      <td><a href="/ui/runs/{{ r.id }}">details →</a></td>
+      <td style="display:flex;gap:0.5rem;align-items:center">
+        <a href="/ui/runs/{{ r.id }}">details →</a>
+        <button class="btn-delete-run"
+                hx-delete="/runs/{{ r.id }}"
+                hx-confirm="Delete run {{ r.id[:8] }}? This cannot be undone."
+                hx-target="closest tr"
+                hx-swap="outerHTML swap:0.2s">✕</button>
+      </td>
     </tr>
     {% endfor %}
   </tbody>

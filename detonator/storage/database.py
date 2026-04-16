@@ -12,7 +12,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_SQL = """
 -- Core tables
@@ -132,6 +132,7 @@ CREATE INDEX IF NOT EXISTS idx_observable_links_source ON observable_links(sourc
 CREATE INDEX IF NOT EXISTS idx_observable_links_target ON observable_links(target_id);
 CREATE INDEX IF NOT EXISTS idx_technique_matches_run ON technique_matches(run_id);
 CREATE INDEX IF NOT EXISTS idx_technique_matches_tech ON technique_matches(technique_id);
+CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(content_hash);
 
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -159,6 +160,10 @@ class Database:
         columns = {row[1] for row in await cursor.fetchall()}
         if "source_url" not in columns:
             await self._db.execute("ALTER TABLE artifacts ADD COLUMN source_url TEXT")
+        # Migration v2 → v3: add content_hash index so refcount probes are O(log n).
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(content_hash)"
+        )
         await self._db.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
             ("version", str(SCHEMA_VERSION)),
@@ -296,6 +301,14 @@ class Database:
             "SELECT * FROM artifacts WHERE run_id=?", (run_id,)
         )
         return [dict(row) for row in await cursor.fetchall()]
+
+    async def count_artifacts_by_hash(self, content_hash: str) -> int:
+        """Return the number of artifact rows with this content_hash across all runs."""
+        cursor = await self.db.execute(
+            "SELECT COUNT(*) FROM artifacts WHERE content_hash = ?", (content_hash,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
 
     async def get_technique_matches_for_run(self, run_id: str) -> list[dict]:
         """Return technique match rows joined with technique metadata for one run."""

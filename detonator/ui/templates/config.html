@@ -22,33 +22,6 @@
       </details>
     {% endif %}
   </article>
-
-  <h4>Known VMs</h4>
-  {% if vm_error %}
-    <article class="card" style="border-left:3px solid var(--pico-del-color)">
-      <strong>Provider unreachable:</strong>
-      <span class="mono">{{ vm_error }}</span>
-    </article>
-  {% elif vms %}
-    <table>
-      <thead>
-        <tr><th>ID</th><th>Name</th><th>State</th><th>IP</th><th>Snapshots</th></tr>
-      </thead>
-      <tbody>
-        {% for vm in vms %}
-          <tr>
-            <td class="mono">{{ vm.vm_id }}</td>
-            <td>{{ vm.name }}</td>
-            <td><span class="status-badge {{ vm.state }}">{{ vm.state }}</span></td>
-            <td class="mono">{{ (vm.network.ip_address if vm.network else '') or '—' }}</td>
-            <td class="mono muted">{{ vm.snapshots|join(', ') or '—' }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p class="muted">No VMs returned.</p>
-  {% endif %}
 </section>
 
 <section>

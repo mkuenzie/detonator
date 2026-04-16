@@ -160,15 +160,16 @@ class EnrichmentPipeline:
 
         now = datetime.now(UTC).isoformat()
 
-        # Collect all unique observables (deduplicate by id).
+        # Collect all unique observables (deduplicate by id), tracking which enricher
+        # produced each one so context_json carries the real module name.
         seen_obs_ids: set[str] = set()
-        observables: list[Observable] = []
+        observables: list[tuple[Observable, str]] = []
         for r in results:
             for obs in r.observables:
                 key = str(obs.id)
                 if key not in seen_obs_ids:
                     seen_obs_ids.add(key)
-                    observables.append(obs)
+                    observables.append((obs, r.enricher))
 
         # Collect all links (deduplicate by source+target+relationship).
         seen_link_keys: set[str] = set()
@@ -190,17 +191,20 @@ class EnrichmentPipeline:
                 from detonator.enrichment.base import observable_id
                 observables.insert(
                     0,
-                    Observable(
-                        id=observable_id(ObservableType.DOMAIN, seed_host),
-                        type=ObservableType.DOMAIN,
-                        value=seed_host,
-                        first_seen=datetime.now(UTC),
-                        last_seen=datetime.now(UTC),
+                    (
+                        Observable(
+                            id=observable_id(ObservableType.DOMAIN, seed_host),
+                            type=ObservableType.DOMAIN,
+                            value=seed_host,
+                            first_seen=datetime.now(UTC),
+                            last_seen=datetime.now(UTC),
+                        ),
+                        "pipeline",
                     ),
                 )
 
         # Upsert observables.
-        for obs in observables:
+        for obs, enricher_name in observables:
             await self._db.upsert_observable(
                 str(obs.id), obs.type.value, obs.value, now
             )
@@ -208,7 +212,7 @@ class EnrichmentPipeline:
                 run_id,
                 str(obs.id),
                 ObservableSource.ENRICHMENT.value,
-                context={"enricher": "pipeline"},
+                context={"enricher": enricher_name},
             )
 
         # Upsert observable→observable links.

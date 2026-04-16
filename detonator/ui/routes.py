@@ -115,14 +115,6 @@ async def _load_agents(deps: AppState) -> list[dict]:
     return out
 
 
-async def _load_vm_list(deps: AppState) -> tuple[list[dict], str | None]:
-    try:
-        vms = await deps.vm_provider.list_vms()
-        return [vm.model_dump() for vm in vms], None
-    except Exception as exc:
-        return [], str(exc)
-
-
 # ── Mount ─────────────────────────────────────────────────────────
 
 
@@ -167,7 +159,6 @@ def _register_routes(app: FastAPI) -> None:
     async def config_page(request: Request):
         deps = _deps(request)
         agents = await _load_agents(deps)
-        vms, vm_err = await _load_vm_list(deps)
         egress = {
             name: cfg.model_dump() for name, cfg in deps.config.egress.items()
         }
@@ -176,8 +167,6 @@ def _register_routes(app: FastAPI) -> None:
             "config.html",
             {
                 "agents": agents,
-                "vms": vms,
-                "vm_error": vm_err,
                 "vm_provider": deps.config.vm_provider.model_dump(),
                 "egress": egress,
                 "timeouts": deps.config.timeouts.model_dump(),
@@ -474,11 +463,17 @@ def _read_enrichment(deps: AppState, run_id: str) -> dict | None:
 async def _load_run_observables(deps: AppState, run_id: str) -> list[dict]:
     """Return observables found during this run, joined with their type/value."""
     cursor = await deps.database.db.execute(
-        """SELECT o.id, o.type, o.value, o.first_seen, o.last_seen, ro.source
+        """SELECT o.id, o.type, o.value, o.first_seen, o.last_seen, ro.source, ro.context_json
            FROM observables o
            JOIN run_observables ro ON o.id = ro.observable_id
            WHERE ro.run_id = ?
            ORDER BY o.type, o.value""",
         (run_id,),
     )
-    return [dict(r) for r in await cursor.fetchall()]
+    rows = []
+    for r in await cursor.fetchall():
+        d = dict(r)
+        ctx = json.loads(d.pop("context_json") or "{}")
+        d["enricher"] = ctx.get("enricher") or d["source"]
+        rows.append(d)
+    return rows
