@@ -167,7 +167,7 @@ def _register_routes(app: FastAPI) -> None:
                 "vm_provider": deps.config.vm_provider.model_dump(),
                 "egress": egress,
                 "timeouts": deps.config.timeouts.model_dump(),
-                "enrichment_modules": deps.config.enrichment_modules,
+                "enrichment_modules": deps.config.enrichment.modules
             },
         )
 
