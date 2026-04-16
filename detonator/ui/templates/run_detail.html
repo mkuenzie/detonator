@@ -169,7 +169,7 @@
       {% for o in observables %}
       <tr>
         <td><code>{{ o.type }}</code></td>
-        <td class="mono"><a href="/observables/{{ o.id }}">{{ o.value }}</a></td>
+        <td class="mono"><a href="/ui/observables/{{ o.id }}">{{ o.value }}</a></td>
         <td class="muted">{{ o.enricher }}</td>
         <td class="muted">{{ o.first_seen|datetime }}</td>
       </tr>

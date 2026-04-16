@@ -402,6 +402,84 @@ class Database:
             "campaigns": [dict(r) for r in await campaigns.fetchall()],
         }
 
+    async def get_observable(self, observable_id: str) -> dict | None:
+        cursor = await self.db.execute(
+            "SELECT * FROM observables WHERE id=?", (observable_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def get_observable_detail(self, observable_id: str) -> dict | None:
+        """Return the full view shape for an observable: base row + metadata
+        + runs it appeared in + outgoing/incoming links (joined with the peer
+        observable's type/value) + campaigns. Returns ``None`` if not found."""
+        obs = await self.get_observable(observable_id)
+        if obs is None:
+            return None
+
+        meta_cursor = await self.db.execute(
+            "SELECT key, value FROM observable_metadata WHERE observable_id=? ORDER BY key",
+            (observable_id,),
+        )
+        obs["metadata"] = {r["key"]: r["value"] for r in await meta_cursor.fetchall()}
+
+        runs_cursor = await self.db.execute(
+            """SELECT r.id, r.seed_url, r.status, r.egress_type, r.created_at, r.completed_at, ro.source
+               FROM runs r
+               JOIN run_observables ro ON r.id = ro.run_id
+               WHERE ro.observable_id = ?
+               ORDER BY r.created_at DESC""",
+            (observable_id,),
+        )
+        obs["runs"] = [dict(r) for r in await runs_cursor.fetchall()]
+
+        out_cursor = await self.db.execute(
+            """SELECT ol.*, o.type AS target_type, o.value AS target_value
+               FROM observable_links ol
+               JOIN observables o ON o.id = ol.target_id
+               WHERE ol.source_id = ?
+               ORDER BY ol.relationship, o.type, o.value""",
+            (observable_id,),
+        )
+        obs["outgoing_links"] = [dict(r) for r in await out_cursor.fetchall()]
+
+        in_cursor = await self.db.execute(
+            """SELECT ol.*, o.type AS source_type, o.value AS source_value
+               FROM observable_links ol
+               JOIN observables o ON o.id = ol.source_id
+               WHERE ol.target_id = ?
+               ORDER BY ol.relationship, o.type, o.value""",
+            (observable_id,),
+        )
+        obs["incoming_links"] = [dict(r) for r in await in_cursor.fetchall()]
+
+        campaigns_cursor = await self.db.execute(
+            """SELECT c.id, c.name, c.description, c.status, co.role
+               FROM campaigns c
+               JOIN campaign_observables co ON c.id = co.campaign_id
+               WHERE co.observable_id = ?
+               ORDER BY c.name""",
+            (observable_id,),
+        )
+        obs["campaigns"] = [dict(r) for r in await campaigns_cursor.fetchall()]
+
+        return obs
+
+    async def get_run_observables(self, run_id: str) -> list[dict]:
+        """Return observables linked to a run, joined with the link's source
+        and context_json. Callers derive display fields (e.g. enricher) from
+        ``context_json`` rather than pushing that parsing into the repository."""
+        cursor = await self.db.execute(
+            """SELECT o.id, o.type, o.value, o.first_seen, o.last_seen,
+                      ro.source, ro.context_json
+               FROM observables o
+               JOIN run_observables ro ON o.id = ro.observable_id
+               WHERE ro.run_id = ?
+               ORDER BY o.type, o.value""",
+            (run_id,),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
     # ── Campaigns ─────────────────────────────────────────────────
 
     async def insert_campaign(

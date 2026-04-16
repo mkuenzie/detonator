@@ -496,22 +496,13 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/observables/{observable_id}")
     async def get_observable(observable_id: UUID, request: Request) -> dict:
+        """Return an observable with its metadata, runs it appeared in,
+        outgoing/incoming links (joined with the peer's type/value), and
+        campaigns. Same shape consumed by the UI's observable detail page."""
         deps = _deps(request)
-        cursor = await deps.database.db.execute(
-            "SELECT * FROM observables WHERE id=?", (str(observable_id),)
-        )
-        row = await cursor.fetchone()
-        if not row:
+        obs = await deps.database.get_observable_detail(str(observable_id))
+        if obs is None:
             raise HTTPException(404, f"Observable {observable_id} not found")
-        obs = dict(row)
-
-        runs_cursor = await deps.database.db.execute(
-            """SELECT r.*, ro.source FROM runs r
-               JOIN run_observables ro ON r.id = ro.run_id
-               WHERE ro.observable_id = ?""",
-            (str(observable_id),),
-        )
-        obs["runs"] = [dict(r) for r in await runs_cursor.fetchall()]
         return obs
 
     @app.get("/observables/{observable_id}/graph")

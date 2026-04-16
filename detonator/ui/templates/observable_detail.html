@@ -1,0 +1,125 @@
+{% extends "_base.html" %}
+{% block title %}{{ obs.type }}: {{ obs.value[:60] }} · Detonator{% endblock %}
+
+{% block content %}
+<header style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
+  <h2 style="margin:0">
+    <code>{{ obs.type }}</code>
+    <span class="mono" style="font-size:0.85em;margin-left:0.5rem">{{ obs.value }}</span>
+  </h2>
+</header>
+
+<section>
+  <article class="card">
+    <div class="flex-row">
+      <div><span class="muted">First seen:</span> {{ obs.first_seen|datetime }}</div>
+      <div><span class="muted">Last seen:</span> {{ obs.last_seen|datetime }}</div>
+      <div><span class="muted">Runs:</span> {{ obs.runs|length }}</div>
+      <div><span class="muted">Links:</span> {{ (obs.outgoing_links|length) + (obs.incoming_links|length) }}</div>
+    </div>
+    <div class="flex-row" style="margin-top:0.4rem">
+      <div><span class="muted">ID:</span> <span class="mono muted" style="font-size:0.85em">{{ obs.id }}</span></div>
+    </div>
+    {% if obs.metadata %}
+    <div style="margin-top:0.75rem">
+      <span class="muted">Metadata:</span>
+      <table style="margin-top:0.35rem">
+        <tbody>
+          {% for k, v in obs.metadata.items() %}
+          <tr>
+            <td class="mono muted" style="white-space:nowrap;padding-right:1.5rem">{{ k }}</td>
+            <td class="mono">{{ v }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </article>
+</section>
+
+{% if obs.runs %}
+<section>
+  <h3>Seen in runs <span class="muted">({{ obs.runs|length }})</span></h3>
+  <table>
+    <thead><tr><th>Run</th><th>URL</th><th>Status</th><th>Source</th><th>Created</th></tr></thead>
+    <tbody>
+      {% for r in obs.runs %}
+      <tr>
+        <td class="mono"><a href="/ui/runs/{{ r.id }}">{{ r.id[:8] }}</a></td>
+        <td class="mono truncate" style="max-width:340px" title="{{ r.seed_url }}">{{ r.seed_url }}</td>
+        <td><span class="status-badge {{ r.status }}">{{ r.status }}</span></td>
+        <td class="muted">{{ r.source }}</td>
+        <td class="muted">{{ r.created_at|datetime }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if obs.outgoing_links or obs.incoming_links %}
+<section>
+  <h3>Observable links <span class="muted">({{ (obs.outgoing_links|length) + (obs.incoming_links|length) }})</span></h3>
+
+  {% if obs.outgoing_links %}
+  <h4 class="muted" style="margin:0.5rem 0 0.25rem">Outgoing</h4>
+  <table>
+    <thead><tr><th>Relationship</th><th>Target</th><th>Type</th><th>Confidence</th><th>First seen</th></tr></thead>
+    <tbody>
+      {% for lnk in obs.outgoing_links %}
+      <tr>
+        <td><code>{{ lnk.relationship }}</code></td>
+        <td class="mono"><a href="/ui/observables/{{ lnk.target_id }}">{{ lnk.target_value }}</a></td>
+        <td class="muted">{{ lnk.target_type }}</td>
+        <td class="muted">{{ "%.2f"|format(lnk.confidence) }}</td>
+        <td class="muted">{{ lnk.first_seen|datetime }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if obs.incoming_links %}
+  <h4 class="muted" style="margin:1rem 0 0.25rem">Incoming</h4>
+  <table>
+    <thead><tr><th>Source</th><th>Type</th><th>Relationship</th><th>Confidence</th><th>First seen</th></tr></thead>
+    <tbody>
+      {% for lnk in obs.incoming_links %}
+      <tr>
+        <td class="mono"><a href="/ui/observables/{{ lnk.source_id }}">{{ lnk.source_value }}</a></td>
+        <td class="muted">{{ lnk.source_type }}</td>
+        <td><code>{{ lnk.relationship }}</code></td>
+        <td class="muted">{{ "%.2f"|format(lnk.confidence) }}</td>
+        <td class="muted">{{ lnk.first_seen|datetime }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if obs.campaigns %}
+<section>
+  <h3>Campaigns <span class="muted">({{ obs.campaigns|length }})</span></h3>
+  <table>
+    <thead><tr><th>Name</th><th>Status</th><th>Role</th><th>Description</th></tr></thead>
+    <tbody>
+      {% for c in obs.campaigns %}
+      <tr>
+        <td><a href="/ui/campaigns/{{ c.id }}">{{ c.name }}</a></td>
+        <td class="muted">{{ c.status or '—' }}</td>
+        <td class="muted">{{ c.role or 'indicator' }}</td>
+        <td class="muted truncate" style="max-width:380px" title="{{ c.description }}">{{ c.description or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if not obs.runs and not obs.outgoing_links and not obs.incoming_links and not obs.campaigns %}
+<p class="muted">No associations recorded for this observable yet.</p>
+{% endif %}
+{% endblock %}

@@ -16,6 +16,7 @@ Interactive, HAR-first URL detonation framework for a home malware/phishing anal
 - **Headed browser only for v1.** Interactive takeover (VNC/SPICE) requires a real desktop session. No headless mode.
 - **Stateless VM.** Every run starts from a clean snapshot. Any malware executing during detonation is destroyed on revert. Never add persistent state to the guest.
 - **Isolation enforced at the network layer, not in the agent.** The agent has no auth. Host nftables rules guarantee the agent's port is only reachable from the orchestrator on the isolated bridge.
+- **UI and API are peer consumers of the repository, not of each other.** Both `detonator/ui/routes.py` and `detonator/orchestrator/api.py` call `deps.database.*` methods directly — neither makes HTTP calls to the other. Enforced rules: (1) any data shape the UI can render must be reachable via an equivalent HTTP endpoint, so the API stays canonically complete; (2) raw SQL lives only in `detonator/storage/database.py` — never in route handlers, UI or API.
 
 ## Architecture at a glance
 
@@ -111,6 +112,14 @@ Every transition is logged with a timestamp and detail. Each stage has a configu
 - **Tests use pytest + pytest-asyncio**. Proxmox tests mock at the module level (patch `detonator.providers.vm.proxmox.asyncio.to_thread`) — `AsyncMock` doesn't play nicely with `asyncio.to_thread` in 3.12+.
 - **No secrets in code or tests.** Config loads from TOML; example at `config.example.toml`.
 - **Structured JSON logging** with per-run context (run ID). Not fully wired yet — add it as components land.
+
+### Where logic lives
+
+- **Repositories** (`detonator/storage/database.py`) stay dumb: CRUD, typed queries, schema-shaped returns. No multi-step orchestration, no cross-store coordination. View-composing queries (e.g. `get_observable_detail` joining metadata + runs + links + campaigns) are fine here — they're still just reads. Callers handle shape-massaging like JSON-field parsing.
+- **Route handlers** (UI and API) stay thin: validate inputs, call one or two repository methods, render/serialize. No raw SQL. No business logic beyond shape-massaging.
+- **Services** (`detonator/services/`) do not exist yet. Introduce them when domain logic genuinely can't fit in a repository or a handler — e.g. multi-store transactions (see `delete_run`'s orphan blob reconciliation in `detonator/orchestrator/api.py`), graph traversals with cost/depth limits, or derived fields synthesized across runs. Grow services from real complexity, not symmetry — a service that only wraps one repo call is cost, not value.
+- **Seams that will promote to services when next touched:** `delete_run` (orphan blob cleanup), observable/campaign detail composition once graph traversals land (multi-hop reachability, shared-infra clustering, campaign confidence from technique overlap). The `Runner` is already service-shaped — leave it where it is.
+- **Trigger conditions for introducing `detonator/services/`:** first multi-hop graph traversal query; dual-store operations during the SQLite → Neo4j migration window; any second multi-step operation with the flavor of `delete_run`'s orphan reconciliation.
 
 ## Out of scope for v1 (don't build these)
 

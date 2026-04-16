@@ -321,6 +321,20 @@ def _register_routes(app: FastAPI) -> None:
             },
         )
 
+    # Observable detail --------------------------------------------
+
+    @app.get("/ui/observables/{observable_id}", include_in_schema=False, response_class=HTMLResponse)
+    async def observable_detail(observable_id: UUID, request: Request):
+        deps = _deps(request)
+        obs = await deps.database.get_observable_detail(str(observable_id))
+        if obs is None:
+            raise HTTPException(404, f"Observable {observable_id} not found")
+        return TEMPLATES.TemplateResponse(
+            request,
+            "observable_detail.html",
+            {"obs": obs},
+        )
+
     @app.post("/ui/runs/{run_id}/resume", include_in_schema=False)
     async def ui_resume(run_id: UUID, request: Request):
         deps = _deps(request)
@@ -458,19 +472,10 @@ def _read_enrichment(deps: AppState, run_id: str) -> dict | None:
 
 
 async def _load_run_observables(deps: AppState, run_id: str) -> list[dict]:
-    """Return observables found during this run, joined with their type/value."""
-    cursor = await deps.database.db.execute(
-        """SELECT o.id, o.type, o.value, o.first_seen, o.last_seen, ro.source, ro.context_json
-           FROM observables o
-           JOIN run_observables ro ON o.id = ro.observable_id
-           WHERE ro.run_id = ?
-           ORDER BY o.type, o.value""",
-        (run_id,),
-    )
-    rows = []
-    for r in await cursor.fetchall():
-        d = dict(r)
+    """Attach the attributed enricher (falling back to the link's raw source)
+    to each observable linked to this run."""
+    rows = await deps.database.get_run_observables(run_id)
+    for d in rows:
         ctx = json.loads(d.pop("context_json") or "{}")
         d["enricher"] = ctx.get("enricher") or d["source"]
-        rows.append(d)
     return rows
