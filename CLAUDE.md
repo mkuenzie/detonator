@@ -6,7 +6,7 @@ Interactive, HAR-first URL detonation framework for a home malware/phishing anal
 
 - Analyst submits a URL → it detonates in a sandboxed VM → artifacts (HAR, screenshots, DOM, console) are captured → the host enriches them (WHOIS/DNS/TLS/favicon) → the HAR is filtered to the initiator chain → results are stored and queryable.
 - One VM, stateless, reverted per run. The host owns routing and isolation. All analysis runs outside the VM against dumped artifacts.
-- Home lab scope: single operator, trusted host network, no auth on the host API.
+- Initially Home lab scope: single operator, trusted host network, no auth on the host API.  But design should follow engineering standards and best practices and be positioned to scale.
 
 ## Non-negotiable design principles
 
@@ -24,11 +24,12 @@ Interactive, HAR-first URL detonation framework for a home malware/phishing anal
 Analyst → Host Orchestrator (FastAPI)
             ├── REST API  (JSON, at /)
             ├── Web UI    (Jinja2 + HTMX, at /ui/)
-            ├── VMProvider (Proxmox first)
+            ├── VMProvider (Proxmox, ...)
             ├── EgressProvider (direct / vpn / tether)
             ├── Agent REST client
             ├── Enrichment pipeline (WHOIS, DNS, TLS, favicon, ...)
             ├── Chain extractor (filters HAR to initiator chain)
+            ├── Analysis pipeline (Sigma rule signature matching)
             └── Storage (SQLite metadata + filesystem blobs)
 
 In-VM Agent (FastAPI + Playwright Chromium, headed)
@@ -82,6 +83,9 @@ detonator/
       egress/                    # EgressProvider ABC + direct/vpn/tether (Phase 3)
     enrichment/                  # Enricher ABC + whois/dns/tls/favicon (Phase 4)
     analysis/                    # chain.py, filter.py (Phase 5)
+      modules/                   # AnalysisModule ABC + builtin + sigma + pipeline (Phase 5b)
+      rules/                     # YAML rulepacks (Phase 5b)
+        builtin/                 # 8 built-in Sigma rules (one per detector)
     storage/                     # database.py, filesystem.py, manifest.py
     ui/                          # Jinja2 + HTMX web UI, mounted at /ui/ (Phase 7)
       routes.py                  # All UI + HTMX-partial handlers
@@ -107,7 +111,7 @@ Every transition is logged with a timestamp and detail. Each stage has a configu
 
 - **Python 3.11+**, `from __future__ import annotations`, Pydantic models, `datetime.now(UTC)` (never `utcnow()`).
 - **Async throughout** for I/O-bound work (provider calls, agent HTTP, enrichment fan-out).
-- **Virtualenv at `.venv/`** at the repo root. Install via `pip install -e ".[dev,proxmox,agent,enrichment,ui]"` depending on what you're touching. The `ui` extra (jinja2 + python-multipart) is required to serve `/ui/`; omit it for headless deployments.
+- **Virtualenv at `.venv/`** at the repo root. Install via `pip install -e ".[dev,proxmox,agent,enrichment,analysis,ui]"` depending on what you're touching. The `ui` extra (jinja2 + python-multipart) is required to serve `/ui/`; the `analysis` extra (pyyaml) is required for Sigma-style rule evaluation; omit either for headless or analysis-free deployments.
 - **Agents are configured, not defaulted.** `config.toml` declares one or more `[[agents]]` entries (name + vm_id + snapshot + port + health timeouts). The Runner takes an `AgentInstanceConfig` explicitly — do not re-introduce the old `default_vm_id` / `default_snapshot` fallback path.
 - **Tests use pytest + pytest-asyncio**. Proxmox tests mock at the module level (patch `detonator.providers.vm.proxmox.asyncio.to_thread`) — `AsyncMock` doesn't play nicely with `asyncio.to_thread` in 3.12+.
 - **No secrets in code or tests.** Config loads from TOML; example at `config.example.toml`.
@@ -121,10 +125,9 @@ Every transition is logged with a timestamp and detail. Each stage has a configu
 - **Seams that will promote to services when next touched:** `delete_run` (orphan blob cleanup), observable/campaign detail composition once graph traversals land (multi-hop reachability, shared-infra clustering, campaign confidence from technique overlap). The `Runner` is already service-shaped — leave it where it is.
 - **Trigger conditions for introducing `detonator/services/`:** first multi-hop graph traversal query; dual-store operations during the SQLite → Neo4j migration window; any second multi-step operation with the flavor of `delete_run`'s orphan reconciliation.
 
-## Out of scope for v1 (don't build these)
+## Out of scope (don't build these)
 
 - Active traffic manipulation (mitmproxy)
-- Signal/signature taxonomy (`signals.py` stub returns empty until framework stabilizes)
 - Multi-browser (Firefox, WebKit)
 - Headless mode
 - Multi-VM concurrent runs
@@ -136,4 +139,8 @@ Every transition is logged with a timestamp and detail. Each stage has a configu
 1. Read [SPEC.md](SPEC.md) for the current phase checklist.
 2. Check what ABCs and models already exist — don't redefine them.
 3. Honor the technology-agnostic boundary: implementation goes behind an existing ABC, not in the caller.
-4. Update [SPEC.md](SPEC.md) as items complete.
+
+## When completing a phase
+
+1. Update [CLAUDE.md](CLAUDE.md) to accurately reflect the current state of the project.  
+2. Update [SPEC.md](SPEC.md) as items complete.

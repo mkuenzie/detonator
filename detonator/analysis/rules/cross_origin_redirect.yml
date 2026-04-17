@@ -1,0 +1,15 @@
+title: Cross-origin redirect chain
+id: e6ab457e-4108-5577-a143-9ac74916866c
+description: >
+  The initiator chain crosses multiple distinct domains via HTTP redirects —
+  common in tracking pixels, cloaking, and multi-hop phishing delivery
+tags: [delivery]
+logsource:
+  product: detonator
+  category: web
+detection:
+  sel_redirects:
+    chain.cross_origin_redirect_count|gte: 2
+  condition: sel_redirects
+signature_type: delivery
+confidence: 0.75

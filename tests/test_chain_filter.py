@@ -16,7 +16,6 @@ Orphaned / extra noise entries
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
 
 import pytest
@@ -33,7 +32,6 @@ from detonator.analysis.filter import (
     REASON_RESOURCE_TYPE,
     REASON_TRACKER,
     NoiseFilter,
-    TechniqueDetector,
 )
 
 # ── Fixture HAR ───────────────────────────────────────────────────────
@@ -405,88 +403,14 @@ def test_noise_filter_har_chain_excludes_noise(tmp_path: Path) -> None:
     assert "https://phish.evil.example.com/landing" in final_urls
 
 
-# ── TechniqueDetector ─────────────────────────────────────────────────
-
-
-def _gcs_entry() -> HarEntry:
-    return HarEntry(
-        url="https://storage.googleapis.com/phish-bucket/page.html",
-        method="GET",
-        resource_type="document",
-    )
-
-
-def _workers_entry() -> HarEntry:
-    return HarEntry(
-        url="https://my-worker.my-account.workers.dev/",
-        method="GET",
-        resource_type="document",
-    )
-
-
-def _redirect_entry(url: str, from_url: str) -> HarEntry:
-    return HarEntry(
-        url=url,
-        method="GET",
-        resource_type="document",
-        initiator_type="redirect",
-        initiator_url=from_url,
-    )
-
-
-def test_technique_detection_gcs() -> None:
-    detector = TechniqueDetector()
-    hits = detector.detect([_gcs_entry()], "run-1")
-    names = {h.name for h in hits}
-    assert "Google Cloud Storage phishing host" in names
-
-
-def test_technique_detection_workers_dev() -> None:
-    detector = TechniqueDetector()
-    hits = detector.detect([_workers_entry()], "run-1")
-    names = {h.name for h in hits}
-    assert "Cloudflare Workers abuse" in names
-
-
-def test_technique_detection_cross_origin_redirect() -> None:
-    detector = TechniqueDetector()
-    entries = [
-        _redirect_entry("https://track.redirect1.com/hop", "https://landing.evil.com/"),
-        _redirect_entry("https://final.evil.net/page", "https://track.redirect1.com/hop"),
-    ]
-    hits = detector.detect(entries, "run-1")
-    names = {h.name for h in hits}
-    assert "Cross-origin redirect chain" in names
-
-
-def test_technique_detection_no_hits() -> None:
-    detector = TechniqueDetector()
-    entries = [
-        HarEntry(
-            url="https://phish.evil.example.com/",
-            resource_type="document",
-            initiator_type="other",
-        )
-    ]
-    hits = detector.detect(entries, "run-1")
-    assert hits == []
-
-
-def test_technique_ids_are_deterministic() -> None:
-    """Same technique name should always produce the same UUID."""
-    detector = TechniqueDetector()
-    hits1 = detector.detect([_gcs_entry()], "run-a")
-    hits2 = detector.detect([_gcs_entry()], "run-b")
-    assert hits1[0].technique_id == hits2[0].technique_id
-    assert uuid.UUID(hits1[0].technique_id)  # valid UUID
-
-
 # ── end-to-end filter_result.json round-trip ──────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_filter_result_json_serialisable(tmp_path: Path) -> None:
     """FilterResult.model_dump(mode='json') should round-trip through json.dumps."""
+    import json
+
     result = extract_chain(_write_har(tmp_path), SEED_URL)
     nf = NoiseFilter()
     fr = nf.run(result, "run-1")  # type: ignore[arg-type]

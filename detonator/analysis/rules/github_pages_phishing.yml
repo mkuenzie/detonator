@@ -1,0 +1,13 @@
+title: GitHub Pages phishing host
+id: f9778155-6eef-5d91-94c1-72f352e51c6e
+description: Page hosted on github.io — used for free static phishing page hosting
+tags: [infrastructure]
+logsource:
+  product: detonator
+  category: web
+detection:
+  host_ghpages:
+    chain.hostname|endswith: .github.io
+  condition: host_ghpages
+signature_type: infrastructure
+confidence: 0.9

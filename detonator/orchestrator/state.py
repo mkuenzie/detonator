@@ -11,6 +11,7 @@ import asyncio
 import logging
 from uuid import UUID
 
+from detonator.analysis.modules.pipeline import AnalysisPipeline
 from detonator.config import DetonatorConfig
 from detonator.enrichment.pipeline import EnrichmentPipeline
 from detonator.orchestrator.runner import Runner
@@ -32,12 +33,14 @@ class AppState:
         database: Database,
         artifact_store: ArtifactStore,
         enrichment_pipeline: EnrichmentPipeline | None = None,
+        analysis_pipeline: AnalysisPipeline | None = None,
     ) -> None:
         self.config = config
         self.vm_provider = vm_provider
         self.database = database
         self.artifact_store = artifact_store
         self.enrichment_pipeline = enrichment_pipeline
+        self.analysis_pipeline = analysis_pipeline
         self._runners: dict[UUID, Runner] = {}
         self._tasks: dict[UUID, asyncio.Task] = {}
 

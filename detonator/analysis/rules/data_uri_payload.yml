@@ -1,0 +1,13 @@
+title: Data URI payload
+id: b345d7d2-f923-52fb-84e3-ca0121a80a3a
+description: Request uses a data: URI — potential obfuscated redirect or inline content injection
+tags: [evasion]
+logsource:
+  product: detonator
+  category: web
+detection:
+  sel_data_uri:
+    chain.url|startswith: "data:"
+  condition: sel_data_uri
+signature_type: evasion
+confidence: 0.9

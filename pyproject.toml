@@ -24,6 +24,7 @@ enrichment = [
     "cryptography>=42.0",
     "mmh3>=4.1",
 ]
+analysis = ["pyyaml>=6.0"]
 agent = [
     "fastapi>=0.110",
     "uvicorn>=0.29",

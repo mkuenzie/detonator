@@ -1,0 +1,13 @@
+title: Microsoft SharePoint phishing host
+id: 187694c3-a266-5d06-8480-050a3b0c54e1
+description: Page hosted on sharepoint.com — used to lend legitimacy to phishing pages
+tags: [infrastructure]
+logsource:
+  product: detonator
+  category: web
+detection:
+  host_sharepoint:
+    chain.hostname|endswith: .sharepoint.com
+  condition: host_sharepoint
+signature_type: infrastructure
+confidence: 0.9

@@ -1,0 +1,15 @@
+title: Google Forms credential harvester
+id: 02bc48e9-ec38-57df-b2d9-a74542e3a0cb
+description: Page uses Google Forms (docs.google.com/forms) as a credential collection endpoint
+tags: [delivery]
+logsource:
+  product: detonator
+  category: web
+detection:
+  sel_host:
+    chain.hostname|contains: docs.google.com
+  sel_path:
+    chain.url|contains: /forms/
+  condition: sel_host and sel_path
+signature_type: delivery
+confidence: 0.9

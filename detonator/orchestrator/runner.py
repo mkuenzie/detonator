@@ -28,6 +28,8 @@ from uuid import UUID, uuid4
 from detonator.analysis.chain import extract_chain
 from detonator.analysis.filter import NoiseFilter
 from detonator.analysis.har_body_map import map_body_files_to_urls
+from detonator.analysis.modules.base import AnalysisContext
+from detonator.analysis.modules.pipeline import AnalysisPipeline
 from detonator.config import AgentInstanceConfig, DetonatorConfig
 from detonator.enrichment.pipeline import EnrichmentPipeline
 from detonator.logging import RunAdapter
@@ -70,6 +72,7 @@ class Runner:
         run_id: UUID | None = None,
         egress_provider: EgressProvider | None = None,
         enrichment_pipeline: EnrichmentPipeline | None = None,
+        analysis_pipeline: AnalysisPipeline | None = None,
     ) -> None:
         self.config = config
         self.agent = agent
@@ -78,6 +81,7 @@ class Runner:
         self.artifact_store = artifact_store
         self.egress_provider = egress_provider
         self.enrichment_pipeline = enrichment_pipeline
+        self.analysis_pipeline = analysis_pipeline
         self.record = RunRecord(
             id=run_id or uuid4(),
             config=run_config,
@@ -471,14 +475,25 @@ class Runner:
             content_hash=fr_hash,
         )
 
-        # Persist technique matches
-        for hit in filter_result.technique_hits:
+        # Run analysis pipeline against the noise-filtered chain
+        technique_hits = []
+        if self.analysis_pipeline is not None:
+            ctx = AnalysisContext.from_chain(
+                chain_result,
+                filter_result,
+                artifact_dir,
+                str(self.record.id),
+                self.record.config.url,
+            )
+            technique_hits = await self.analysis_pipeline.run(ctx)
+
+        for hit in technique_hits:
             await self.database.upsert_technique(
                 tech_id=hit.technique_id,
                 name=hit.name,
                 description=hit.description,
                 signature_type=hit.signature_type,
-                detection_module="detonator.analysis.filter",
+                detection_module=hit.detection_module,
             )
             await self.database.insert_technique_match(
                 technique_id=hit.technique_id,
@@ -490,7 +505,7 @@ class Runner:
         detail = (
             f"chain={filter_result.chain_requests} "
             f"noise={filter_result.noise_requests} "
-            f"techniques={len(filter_result.technique_hits)}"
+            f"techniques={len(technique_hits)}"
         )
         self._log.info("filter complete: %s", detail)
 

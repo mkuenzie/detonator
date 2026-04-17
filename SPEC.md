@@ -12,6 +12,7 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 | 3 | Egress & Isolation | Partial (direct egress complete; VPN/tether deferred) |
 | 4 | Enrichment Pipeline | Complete |
 | 5 | Chain Extraction & Filtering | Complete |
+| 5b | Analysis Modularization | Complete |
 | 6 | Manifest & Polish | Complete |
 | 7 | Web UI | Complete (read-only dashboard + run submission; graph view deferred) |
 
@@ -116,7 +117,7 @@ Living document tracking what's built, what's next, and what's deferred. Update 
 
 ---
 
-## Phase 3 — Egress & Isolation (Partial — direct complete, VPN/tether deferred)
+## Phase 3 — Egress & Isolation (Partial — direct + tether complete, VPN deferred)
 
 **Architecture decision:** The orchestrator VM acts as the L3 sandbox gateway.
 Proxmox's only role is VM lifecycle; all routing, NAT, and firewall rules live in
@@ -137,10 +138,17 @@ for the full topology and rationale.
   - `egress_provider` is an optional constructor arg — runs without egress if not provided
 - [x] `api.py`: `build_egress_provider()` maps `EgressType` → provider instance + configure; passed to each Runner at run creation
 - [x] Unit tests — 12 tests in [tests/test_direct_egress.py](tests/test_direct_egress.py): configure, ruleset generation (with/without lan_cidr), activate command sequence, deactivate idempotency, preflight pass/fail, get_public_ip
+- [x] `TetherEgressProvider` ([detonator/providers/egress/tether.py](detonator/providers/egress/tether.py))
+  - Same nftables structure as `DirectEgressProvider`; separate table name `detonator-tether` so both providers can coexist
+  - `preflight_check()` adds uplink IPv4-liveness check before calling ipify — fails fast with a clear message if Personal Hotspot is off
+  - `get_public_ip()` binds the httpx connection to the tether interface IP via `AsyncHTTPTransport(local_address=...)` so the check measures the tether path, not the default route
+  - `build_egress_provider()` in `api.py` updated with `elif provider_type == "tether":` branch
+- [x] Unit tests — 13 tests in [tests/test_tether_egress.py](tests/test_tether_egress.py): configure, ruleset generation (table name, with/without lan_cidr), activate, deactivate idempotency, preflight pass/fail/no-IPv4, get_public_ip
+- [x] `config.example.toml` updated: tether block uncommented with `enxea98eebb97c7`-style placeholder and 172.20.10.0/28 subnet note
+- [x] [docs/tether-setup.md](docs/tether-setup.md): Proxmox USB passthrough (05ac:12a8), ipheth + usbmuxd prereqs, Trust This Computer pairing, systemd-networkd unit, verify-before-running checklist
 
 ### Remaining / deferred
 - [ ] VPN egress provider (WireGuard tunnel steering)
-- [ ] USB tether egress provider (RNDIS/CDC interface routing)
 - [ ] Pre-flight: LAN isolation probe (agent attempts to reach host-LAN IP, asserts failure)
 - [ ] Pre-flight: DNS-path check (DNS queries exit via expected egress)
 - [ ] Post-teardown verification (assert nftables table absent after run)
@@ -236,6 +244,33 @@ for the full topology and rationale.
   - `NoiseFilter`: tracking domain, ping resource type, no-chain orphan, clean chain entries, counts, extra config domain, final HAR exclusions
   - `TechniqueDetector`: GCS, workers.dev, cross-origin redirect, no hits, deterministic IDs
   - JSON serialisation round-trip
+
+---
+
+## Phase 5b — Analysis Modularization (Complete)
+
+- Status: Complete
+- Trigger: aligns analysis with enrichment's modular shape; enables user-authored rules without code changes.
+- Summary: `TechniqueDetector` removed from `filter.py`; replaced with `AnalysisPipeline` of `AnalysisModule`s. Two initial modules: `builtin` (pure Python, ports the original 8 detectors) + `sigma` (YAML rulepack, evaluated against `AnalysisContext` without a SIEM backend). Rules live in `detonator/analysis/rules/`.
+
+### What was built
+
+- [x] `detonator/analysis/modules/` package
+  - `base.py` — `AnalysisContext`, `TechniqueHit` (with `detection_module` field), `AnalysisModule` ABC, `_tech_id` helper, `AnalysisContext.from_chain()` classmethod
+  - `pipeline.py` — `AnalysisPipeline` with `asyncio.gather` fan-out, exception swallowing, deduplication by `technique_id` (first writer wins, highest confidence kept), `build_from_config()` factory
+  - `builtin.py` — `BuiltinTechniqueModule` porting the 7 per-entry + 1 chain-level detectors; each hit carries `detection_module="builtin"`
+  - `sigma.py` — `SigmaModule` loading `*.yml`/`*.yaml` from configured dirs; custom evaluator against `AnalysisContext` fact dict; supported modifiers: `contains`, `startswith`, `endswith`, `re`, `gte`, `lte`; condition expression parser supporting `and`/`or`/`not` and parentheses; unsupported rules skipped at load time
+- [x] Rulepack `detonator/analysis/rules/builtin/` — 8 YAML files with stable `uuid5` IDs matching the old `_tech_id()` output
+- [x] `detonator/config.py` — `AnalysisModuleConfig` placeholder, `AnalysisConfig(modules, rules_dirs)`, wired into `DetonatorConfig.analysis`
+- [x] `config.example.toml` — new `[analysis]` section with `modules` and `rules_dirs`
+- [x] Runner wired: `_filter()` builds `AnalysisContext.from_chain()`, calls `await pipeline.run(ctx)`, persists hits with `detection_module=hit.detection_module`
+- [x] `detonator/analysis/filter.py` pruned: `TechniqueDetector`, `TechniqueHit`, `_ENTRY_DETECTORS`, `_TECH_NS`, `_tech_id` removed; `FilterResult.technique_hits` removed; default noise catalogues preserved
+- [x] `pyproject.toml` — new `analysis = ["pyyaml>=6.0"]` optional extra
+- [x] Tests: 3 new test files
+  - `tests/test_analysis_builtin.py` — parity + detection_module field verification
+  - `tests/test_analysis_sigma.py` — all modifier types, all condition combinators, list OR semantics, error cases
+  - `tests/test_analysis_pipeline.py` — exception swallowing, aggregation, deduplication
+- [x] `tests/test_chain_filter.py` — `TechniqueDetector` imports and technique-hit tests removed; noise-filter coverage preserved
 
 ---
 

@@ -24,6 +24,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from detonator.analysis.modules.pipeline import AnalysisPipeline
 from detonator.config import DetonatorConfig, load_config
 from detonator.enrichment.pipeline import EnrichmentPipeline
 from detonator.logging import setup_logging
@@ -115,6 +116,10 @@ async def build_egress_provider(
         from detonator.providers.egress.direct import DirectEgressProvider
 
         provider: EgressProvider = DirectEgressProvider()
+    elif provider_type == "tether":
+        from detonator.providers.egress.tether import TetherEgressProvider
+
+        provider = TetherEgressProvider()
     else:
         logger.warning("Unknown egress provider type %r — skipping egress setup", provider_type)
         return None
@@ -130,6 +135,7 @@ def create_app(
     database: Database | None = None,
     artifact_store: ArtifactStore | None = None,
     enrichment_pipeline: EnrichmentPipeline | None = None,
+    analysis_pipeline: AnalysisPipeline | None = None,
 ) -> FastAPI:
     """Build a FastAPI app. All deps are optional for testability."""
     vm_provider = vm_provider or build_vm_provider(config)
@@ -138,6 +144,7 @@ def create_app(
     enrichment_pipeline = enrichment_pipeline or EnrichmentPipeline.build_from_config(
         config, database, artifact_store
     )
+    analysis_pipeline = analysis_pipeline or AnalysisPipeline.build_from_config(config)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -158,6 +165,7 @@ def create_app(
             database=database,
             artifact_store=artifact_store,
             enrichment_pipeline=enrichment_pipeline,
+            analysis_pipeline=analysis_pipeline,
         )
         try:
             yield
@@ -270,6 +278,7 @@ def _register_routes(app: FastAPI) -> None:
             run_id=uuid4(),
             egress_provider=egress_provider,
             enrichment_pipeline=deps.enrichment_pipeline,
+            analysis_pipeline=deps.analysis_pipeline,
         )
         task = asyncio.create_task(runner.execute())
         deps.register(runner, task)

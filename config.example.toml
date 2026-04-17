@@ -51,8 +51,24 @@ sandbox_cidr = "192.168.100.0/24"
 # LAN subnet to block from the sandbox (isolation invariant).
 lan_cidr = "192.168.1.0/24"
 
-# VPN and tether egress providers are not yet implemented (Phase 3 deferred).
-# Uncomment and fill in once those providers land.
+# USB tether egress — routes sandbox traffic through a USB-tethered iPhone.
+# The interface name is assigned by the ipheth kernel driver and is derived
+# from the phone's MAC address (enx<mac-without-colons>).  Replace the
+# placeholder below with the actual interface name on your host.
+# The iPhone Personal Hotspot DHCP server uses the 172.20.10.0/28 subnet;
+# the host gets an address like 172.20.10.2.  See docs/tether-setup.md for
+# Proxmox USB passthrough, kernel/usbmuxd prereqs, and the systemd-networkd
+# unit that runs DHCP without stealing the default route.
+#
+# [egress.tether]
+# type = "tether"
+#
+# [egress.tether.settings]
+# uplink_interface = "enxea98eebb97c7"  # replace with your interface name
+# sandbox_cidr = "192.168.100.0/24"
+# lan_cidr = "192.168.1.0/24"
+
+# VPN egress provider is not yet implemented (Phase 3 deferred).
 #
 # [egress.vpn]
 # type = "vpn"
@@ -62,20 +78,45 @@ lan_cidr = "192.168.1.0/24"
 # sandbox_cidr = "192.168.100.0/24"
 # lan_cidr = "192.168.1.0/24"
 # wg_config = "/etc/wireguard/detonator.conf"
-#
-# [egress.tether]
-# type = "tether"
-#
-# [egress.tether.settings]
-# uplink_interface = "usb0"
-# sandbox_cidr = "192.168.100.0/24"
-# lan_cidr = "192.168.1.0/24"
 
 # HAR chain filter — controls which requests are written to har_chain.json.
 # noise_domains supplements (does not replace) the built-in tracker list.
 [filter]
-noise_domains = []
-noise_resource_types = []
+noise_domains = [
+  "google-analytics.com",
+  "www.google-analytics.com",
+  "ssl.google-analytics.com",
+  "googletagmanager.com",
+  "www.googletagmanager.com",
+  "doubleclick.net",
+  "ad.doubleclick.net",
+  "googlesyndication.com",
+  "connect.facebook.net",
+  "www.facebook.com",
+  "facebook.com",
+  "platform.twitter.com",
+  "t.co",
+  "static.hotjar.com",
+  "script.hotjar.com",
+  "cdn.segment.com",
+  "api.segment.io",
+  "intercom.io",
+  "widget.intercom.io",
+  "bat.bing.com",
+  "mc.yandex.ru",
+  "analytics.tiktok.com",
+  "snap.licdn.com",
+]
+noise_resource_types = ["ping", "preflight", "csp-violation-report", "beacon"]
+
+# Analysis pipeline — controls which technique-detection modules run.
+# modules: sigma (YAML rulepack).
+# rules_dirs: list of directories scanned for *.yml / *.yaml Sigma rules.
+# Add your own rule directories here — they will be loaded alongside the default.
+[analysis]
+modules = ["sigma"]
+rules_dirs = ["detonator/analysis/rules"]
+# rules_dirs = ["detonator/analysis/rules", "~/.detonator/rules"]
 
 # Enrichment pipeline — controls which modules run and per-enricher exclusions.
 # Host entries match exactly OR as a "*.<host>" suffix (e.g. "googleapis.com"
@@ -87,34 +128,76 @@ modules = ["whois", "dns", "tls", "favicon"]
 # CDN/cloud/SaaS registrants are always the provider, never the adversary.
 [enrichment.whois]
 exclude_hosts = [
-  "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
-  "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
-  "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
-  "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+  "jsdelivr.net",
+  "unpkg.com",
+  "cdnjs.cloudflare.com",
+  "cloudflare.com",
+  "googleapis.com",
+  "gstatic.com",
+  "google-analytics.com",
+  "googletagmanager.com",
+  "doubleclick.net",
+  "amazonaws.com",
+  "cloudfront.net",
+  "azureedge.net",
+  "akamaihd.net",
+  "akamaized.net",
+  "fbcdn.net",
+  "bootstrapcdn.com",
+  "jquery.com",
 ]
 
 # Same set — anycast ranges resolve to known provider blocks, low signal.
 [enrichment.dns]
 exclude_hosts = [
-  "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
-  "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
-  "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
-  "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+  "jsdelivr.net",
+  "unpkg.com",
+  "cdnjs.cloudflare.com",
+  "cloudflare.com",
+  "googleapis.com",
+  "gstatic.com",
+  "google-analytics.com",
+  "googletagmanager.com",
+  "doubleclick.net",
+  "amazonaws.com",
+  "cloudfront.net",
+  "azureedge.net",
+  "akamaihd.net",
+  "akamaized.net",
+  "fbcdn.net",
+  "bootstrapcdn.com",
+  "jquery.com",
 ]
 
 # Narrower — only shared-tenant CDNs where the leaf cert is the provider's.
 # Per-tenant certs on amazonaws.com/cloudfront.net do carry signal; keep those.
 [enrichment.tls]
 exclude_hosts = [
-  "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com",
-  "googleapis.com", "gstatic.com",
+  "jsdelivr.net",
+  "unpkg.com",
+  "cdnjs.cloudflare.com",
+  "googleapis.com",
+  "gstatic.com",
 ]
 
 # CDN origins don't serve a meaningful /favicon.ico.
 [enrichment.favicon]
 exclude_hosts = [
-  "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
-  "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
-  "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
-  "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+  "jsdelivr.net",
+  "unpkg.com",
+  "cdnjs.cloudflare.com",
+  "cloudflare.com",
+  "googleapis.com",
+  "gstatic.com",
+  "google-analytics.com",
+  "googletagmanager.com",
+  "doubleclick.net",
+  "amazonaws.com",
+  "cloudfront.net",
+  "azureedge.net",
+  "akamaihd.net",
+  "akamaized.net",
+  "fbcdn.net",
+  "bootstrapcdn.com",
+  "jquery.com",
 ]

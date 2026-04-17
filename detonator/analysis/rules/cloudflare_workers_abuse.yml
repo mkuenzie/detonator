@@ -1,0 +1,13 @@
+title: Cloudflare Workers abuse
+id: 5a4321b9-8a7d-5d2e-9b5d-50392c7ccd8b
+description: Page hosted on workers.dev — used to proxy phishing pages behind Cloudflare infrastructure
+tags: [infrastructure]
+logsource:
+  product: detonator
+  category: web
+detection:
+  host_workers:
+    chain.hostname|endswith: .workers.dev
+  condition: host_workers
+signature_type: infrastructure
+confidence: 0.9

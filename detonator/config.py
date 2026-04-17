@@ -83,6 +83,18 @@ class EnrichmentConfig(BaseModel):
     tld: EnricherConfig = EnricherConfig()
 
 
+class AnalysisModuleConfig(BaseModel):
+    """Placeholder for future per-module analysis settings."""
+
+
+class AnalysisConfig(BaseModel):
+    """Analysis pipeline configuration."""
+
+    modules: list[str] = ["builtin", "sigma"]
+    # Directories scanned for Sigma YAML rules. Paths relative to CWD or absolute.
+    rules_dirs: list[str] = ["detonator/analysis/rules/builtin"]
+
+
 class DetonatorConfig(BaseModel):
     """Top-level configuration for the detonator host orchestrator."""
 
@@ -95,6 +107,7 @@ class DetonatorConfig(BaseModel):
     timeouts: TimeoutsConfig = TimeoutsConfig()
     enrichment: EnrichmentConfig = EnrichmentConfig()
     filter: FilterConfig = FilterConfig()
+    analysis: AnalysisConfig = AnalysisConfig()
     log_level: str = "INFO"
 
     def get_agent(self, name: str) -> AgentInstanceConfig:
