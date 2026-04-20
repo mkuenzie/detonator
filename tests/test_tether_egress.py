@@ -126,8 +126,13 @@ async def test_activate_calls_sysctl_and_nft(provider):
         "ip route add default via gateway not called"
     )
     assert any(
-        "ip" in c and "rule" in c and "add" in c and "192.168.100.0/24" in c for c in cmds
-    ), "ip rule add from sandbox not called"
+        "ip" in c and "rule" in c and "add" in c and "192.168.100.0/24" in c and "main" in c
+        for c in cmds
+    ), "ip rule add bypass (sandbox→sandbox to main) not called"
+    assert any(
+        "ip" in c and "rule" in c and "add" in c and "192.168.100.0/24" in c and "main" not in c
+        for c in cmds
+    ), "ip rule add forwarding (sandbox→uplink) not called"
     assert any(
         "ip" in c and "rule" in c and "add" in c and "172.20.10.2/28" in c for c in cmds
     ), "ip rule add from uplink cidr not called"
@@ -174,6 +179,10 @@ async def test_deactivate_deletes_table(provider):
     assert any(
         "ip" in c and "rule" in c and "del" in c and "192.168.100.0/24" in c for c in cmds
     ), "ip rule del not called"
+    assert any(
+        "ip" in c and "rule" in c and "del" in c and "192.168.100.0/24" in c and "main" in c
+        for c in cmds
+    ), "ip rule del bypass (sandbox→sandbox main) not called"
     assert any(
         "ip" in c and "route" in c and "flush" in c and str(_TABLE_ID) in c for c in cmds
     ), "ip route flush table not called"
