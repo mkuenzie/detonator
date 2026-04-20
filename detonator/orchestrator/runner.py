@@ -20,7 +20,6 @@ been captured preserved on disk.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -302,15 +301,9 @@ class Runner:
             if self.record.config.interactive:
                 await self._handle_interactive_pause(agent)
 
-            interactive = self.record.config.interactive
-            timeout_ctx = (
-                contextlib.nullcontext()
-                if interactive
-                else asyncio.timeout(self.config.timeouts.detonate_sec)
-            )
-            async with timeout_ctx:
+            async with asyncio.timeout(self.config.timeouts.detonate_sec):
                 final = await agent.wait_for_terminal(
-                    timeout_sec=None if interactive else self.config.timeouts.detonate_sec,
+                    timeout_sec=self.config.timeouts.detonate_sec,
                     poll_sec=2.0,
                 )
 
