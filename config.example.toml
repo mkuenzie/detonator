@@ -48,6 +48,8 @@ type = "direct"
 uplink_interface = "ens18"
 # CIDR of the sandbox network (orchestrator ens19 / agent VM).
 sandbox_cidr = "192.168.100.0/24"
+# LAN gateway reachable via uplink_interface (required for policy routing).
+gateway = "192.168.0.1"
 # LAN subnet to block from the sandbox (isolation invariant).
 lan_cidr = "192.168.1.0/24"
 
@@ -66,6 +68,7 @@ lan_cidr = "192.168.1.0/24"
 # [egress.tether.settings]
 # uplink_interface = "enxea98eebb97c7"  # replace with your interface name
 # sandbox_cidr = "192.168.100.0/24"
+# gateway = "172.20.10.1"              # iPhone hotspot gateway (default for iOS Personal Hotspot)
 # lan_cidr = "192.168.1.0/24"
 
 # VPN egress provider is not yet implemented (Phase 3 deferred).

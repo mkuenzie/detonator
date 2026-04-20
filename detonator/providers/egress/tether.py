@@ -3,25 +3,31 @@
 Routing topology:
     sandbox CIDR (ens19/vmbr1) → orchestrator → uplink (enxXXXXXXXXXXXX) → carrier NAT → internet
 
-Activation installs an nftables table named ``detonator-tether`` that:
+Activation installs a policy routing rule + default route in table 101 so that
+sandbox packets exit via the tether regardless of the host default route (the
+tether's DHCP-learned default route is — and must remain — suppressed on the
+host), then loads an nftables table named ``detonator-tether`` that:
   - MASQUERADEs sandbox traffic out the tether interface
   - Drops sandbox → LAN traffic (isolation invariant, when ``lan_cidr`` is set)
   - Accepts established/related return traffic
   - Drops any other sandbox forward attempts
 
-Deactivation deletes the table — idempotent, safe to call even if activate()
-was never called or the table was already removed.
+Deactivation removes the nftables table and then flushes table 101 + removes
+the policy rule — idempotent, safe to call even if activate() was never called.
 
 Required config keys::
 
     {
         "uplink_interface": "enxea98eebb97c7", # USB tether NIC (ipheth/RNDIS)
         "sandbox_cidr": "192.168.100.0/24",    # IP range of the agent VM network
+        "gateway": "172.20.10.1",              # iPhone hotspot gateway; required because
+                                               # the tether default route is suppressed on
+                                               # the host (must not become its default)
         "lan_cidr": "192.168.1.0/24",          # host LAN to block (optional but recommended)
     }
 
 The orchestrator process must have CAP_NET_ADMIN (i.e. run as root) for
-``nft`` and ``sysctl`` to succeed.
+``nft``, ``sysctl``, and ``ip`` to succeed.
 
 Assumptions:
   - The tether interface has an IPv4 lease before activate() is called.
@@ -44,11 +50,14 @@ from pathlib import Path
 
 import httpx
 
+from detonator.providers.egress._routing import add_policy_route, remove_policy_route
 from detonator.providers.egress.base import EgressProvider, PreflightResult
 
 logger = logging.getLogger(__name__)
 
 _TABLE = "detonator-tether"
+_TABLE_ID = 101  # dedicated routing table for tether egress; adjust if conflicts with host tables
+_RULE_PRIORITY = 1000
 _IP_ECHO_URL = "https://api.ipify.org?format=json"
 
 
@@ -58,6 +67,7 @@ class TetherEgressProvider(EgressProvider):
     def __init__(self) -> None:
         self._uplink: str = ""
         self._sandbox_cidr: str = ""
+        self._gateway: str = ""
         self._lan_cidr: str | None = None
 
     # ── EgressProvider interface ─────────────────────────────────
@@ -65,19 +75,30 @@ class TetherEgressProvider(EgressProvider):
     async def configure(self, config: dict) -> None:
         self._uplink = config["uplink_interface"]
         self._sandbox_cidr = config["sandbox_cidr"]
+        self._gateway = config["gateway"]
         self._lan_cidr = config.get("lan_cidr")
         logger.info(
-            "TetherEgressProvider configured: uplink=%s sandbox=%s lan=%s",
+            "TetherEgressProvider configured: uplink=%s sandbox=%s gateway=%s lan=%s",
             self._uplink,
             self._sandbox_cidr,
+            self._gateway,
             self._lan_cidr,
         )
 
     async def activate(self, vm_id: str) -> None:
-        """Enable IP forwarding and load the nftables ruleset."""
+        """Enable IP forwarding, install policy route, and load the nftables ruleset."""
         logger.info("vm=%s activating tether egress", vm_id)
 
         await self._run_cmd("sysctl", "-w", "net.ipv4.ip_forward=1")
+
+        await add_policy_route(
+            self._run_cmd,
+            table_id=_TABLE_ID,
+            sandbox_cidr=self._sandbox_cidr,
+            uplink_iface=self._uplink,
+            gateway=self._gateway,
+            rule_priority=_RULE_PRIORITY,
+        )
 
         ruleset = self._build_ruleset()
         with tempfile.NamedTemporaryFile(
@@ -93,7 +114,7 @@ class TetherEgressProvider(EgressProvider):
             Path(ruleset_path).unlink(missing_ok=True)
 
     async def deactivate(self, vm_id: str) -> None:
-        """Remove the nftables table. Idempotent — safe to call when not active."""
+        """Remove the nftables table and policy route. Idempotent."""
         logger.info("vm=%s deactivating tether egress", vm_id)
         rc, _, stderr = await self._run_cmd(
             "nft", "delete", "table", "ip", _TABLE, check=False
@@ -106,6 +127,13 @@ class TetherEgressProvider(EgressProvider):
                 logger.warning(
                     "nft delete table returned unexpected rc=%d: %s", rc, stderr.strip()
                 )
+
+        await remove_policy_route(
+            self._run_cmd,
+            table_id=_TABLE_ID,
+            sandbox_cidr=self._sandbox_cidr,
+            rule_priority=_RULE_PRIORITY,
+        )
 
     async def preflight_check(self, vm_id: str) -> PreflightResult:
         """Verify the tether uplink has an IPv4 lease, then confirm public IP."""

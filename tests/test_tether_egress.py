@@ -1,6 +1,6 @@
 """Tests for TetherEgressProvider.
 
-All nft / sysctl calls are intercepted by patching ``_run_cmd`` on the
+All nft / sysctl / ip calls are intercepted by patching ``_run_cmd`` on the
 provider instance.  No subprocess is ever spawned.  The public-IP check
 is intercepted via pytest-httpx.  The IPv4 uplink-liveness check is
 intercepted by patching ``_get_uplink_ipv4``.
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from detonator.providers.egress.tether import TetherEgressProvider, _TABLE
+from detonator.providers.egress.tether import TetherEgressProvider, _TABLE, _TABLE_ID
 
 # ── Fixtures ──────────────────────────────────────────────────────
 
@@ -22,6 +22,7 @@ async def provider():
         {
             "uplink_interface": "enxea98eebb97c7",
             "sandbox_cidr": "192.168.100.0/24",
+            "gateway": "172.20.10.1",
             "lan_cidr": "192.168.1.0/24",
         }
     )
@@ -36,6 +37,7 @@ async def provider_no_lan():
         {
             "uplink_interface": "enxea98eebb97c7",
             "sandbox_cidr": "192.168.100.0/24",
+            "gateway": "172.20.10.1",
         }
     )
     return p
@@ -47,11 +49,24 @@ async def provider_no_lan():
 async def test_configure_stores_fields(provider):
     assert provider._uplink == "enxea98eebb97c7"
     assert provider._sandbox_cidr == "192.168.100.0/24"
+    assert provider._gateway == "172.20.10.1"
     assert provider._lan_cidr == "192.168.1.0/24"
 
 
 async def test_configure_lan_cidr_optional(provider_no_lan):
     assert provider_no_lan._lan_cidr is None
+
+
+async def test_configure_requires_gateway():
+    """configure() must raise KeyError when gateway is absent."""
+    p = TetherEgressProvider()
+    with pytest.raises(KeyError):
+        await p.configure(
+            {
+                "uplink_interface": "enxea98eebb97c7",
+                "sandbox_cidr": "192.168.100.0/24",
+            }
+        )
 
 
 # ── _build_ruleset ───────────────────────────────────────────────
@@ -92,7 +107,7 @@ async def test_ruleset_uses_tether_table_name(provider):
 
 
 async def test_activate_calls_sysctl_and_nft(provider):
-    """activate() must enable IP forwarding and load the nftables ruleset."""
+    """activate() must enable IP forwarding, install policy route, and load the nftables ruleset."""
     calls: list[tuple[str, ...]] = []
 
     async def fake_run(*args: str, check: bool = True) -> tuple[int, str, str]:
@@ -106,6 +121,12 @@ async def test_activate_calls_sysctl_and_nft(provider):
     assert any("sysctl" in c and "ip_forward" in c for c in cmds), (
         "sysctl net.ipv4.ip_forward=1 not called"
     )
+    assert any("ip" in c and "route" in c and "add" in c and "172.20.10.1" in c for c in cmds), (
+        "ip route add default via gateway not called"
+    )
+    assert any(
+        "ip" in c and "rule" in c and "add" in c and "192.168.100.0/24" in c for c in cmds
+    ), "ip rule add from sandbox not called"
     assert any("nft" in c and "-f" in c for c in cmds), "nft -f <ruleset> not called"
 
 
@@ -122,9 +143,16 @@ async def test_deactivate_deletes_table(provider):
     provider._run_cmd = fake_run  # type: ignore[method-assign]
     await provider.deactivate("100")
 
+    cmds = [" ".join(a) for a in calls]
     assert any(
-        "nft" in c and "delete" in c and _TABLE in c for c in [" ".join(a) for a in calls]
+        "nft" in c and "delete" in c and _TABLE in c for c in cmds
     ), "nft delete table not called"
+    assert any(
+        "ip" in c and "rule" in c and "del" in c and "192.168.100.0/24" in c for c in cmds
+    ), "ip rule del not called"
+    assert any(
+        "ip" in c and "route" in c and "flush" in c and str(_TABLE_ID) in c for c in cmds
+    ), "ip route flush table not called"
 
 
 async def test_deactivate_is_idempotent_when_table_absent(provider):
@@ -133,6 +161,20 @@ async def test_deactivate_is_idempotent_when_table_absent(provider):
     async def fake_run(*args: str, check: bool = True) -> tuple[int, str, str]:
         if "delete" in args:
             return 1, "", "Error: No such file or directory"
+        return 0, "", ""
+
+    provider._run_cmd = fake_run  # type: ignore[method-assign]
+    await provider.deactivate("100")
+
+
+async def test_deactivate_is_idempotent_when_route_absent(provider):
+    """deactivate() must not raise when route/rule are already absent."""
+
+    async def fake_run(*args: str, check: bool = True) -> tuple[int, str, str]:
+        if "rule" in args and "del" in args:
+            return 2, "", "RTNETLINK answers: No such process"
+        if "flush" in args:
+            return 2, "", "RTNETLINK answers: No such file or directory"
         return 0, "", ""
 
     provider._run_cmd = fake_run  # type: ignore[method-assign]

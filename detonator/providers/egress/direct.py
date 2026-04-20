@@ -3,25 +3,28 @@
 Routing topology:
     sandbox CIDR (ens19/vmbr1) → orchestrator → uplink (ens18) → internet
 
-Activation installs an nftables table named ``detonator`` that:
+Activation installs a policy routing rule + default route in table 100 so that
+sandbox packets are steered to the uplink regardless of the host default route,
+then loads an nftables table named ``detonator`` that:
   - MASQUERADEs sandbox traffic out the uplink interface
   - Drops sandbox → LAN traffic (isolation invariant, when ``lan_cidr`` is set)
   - Accepts established/related return traffic
   - Drops any other sandbox forward attempts
 
-Deactivation deletes the table — idempotent, safe to call even if activate()
-was never called or the table was already removed.
+Deactivation removes the nftables table and then flushes table 100 + removes
+the policy rule — idempotent, safe to call even if activate() was never called.
 
 Required config keys::
 
     {
-        "uplink_interface": "ens18",       # NIC that has internet access
+        "uplink_interface": "ens18",        # NIC that has internet access
         "sandbox_cidr": "192.168.100.0/24", # IP range of the agent VM network
-        "lan_cidr": "192.168.1.0/24",      # host LAN to block (optional but recommended)
+        "gateway": "192.168.0.1",           # LAN gateway reachable via uplink_interface
+        "lan_cidr": "192.168.1.0/24",       # host LAN to block (optional but recommended)
     }
 
 The orchestrator process must have CAP_NET_ADMIN (i.e. run as root) for
-``nft`` and ``sysctl`` to succeed.
+``nft``, ``sysctl``, and ``ip`` to succeed.
 """
 
 from __future__ import annotations
@@ -33,11 +36,14 @@ from pathlib import Path
 
 import httpx
 
+from detonator.providers.egress._routing import add_policy_route, remove_policy_route
 from detonator.providers.egress.base import EgressProvider, PreflightResult
 
 logger = logging.getLogger(__name__)
 
 _TABLE = "detonator"
+_TABLE_ID = 100  # dedicated routing table for direct egress; adjust if conflicts with host tables
+_RULE_PRIORITY = 1000
 _IP_ECHO_URL = "https://api.ipify.org?format=json"
 
 
@@ -47,6 +53,7 @@ class DirectEgressProvider(EgressProvider):
     def __init__(self) -> None:
         self._uplink: str = ""
         self._sandbox_cidr: str = ""
+        self._gateway: str = ""
         self._lan_cidr: str | None = None
 
     # ── EgressProvider interface ─────────────────────────────────
@@ -54,22 +61,31 @@ class DirectEgressProvider(EgressProvider):
     async def configure(self, config: dict) -> None:
         self._uplink = config["uplink_interface"]
         self._sandbox_cidr = config["sandbox_cidr"]
+        self._gateway = config["gateway"]
         self._lan_cidr = config.get("lan_cidr")
         logger.info(
-            "DirectEgressProvider configured: uplink=%s sandbox=%s lan=%s",
+            "DirectEgressProvider configured: uplink=%s sandbox=%s gateway=%s lan=%s",
             self._uplink,
             self._sandbox_cidr,
+            self._gateway,
             self._lan_cidr,
         )
 
     async def activate(self, vm_id: str) -> None:
-        """Enable IP forwarding and load the nftables ruleset."""
+        """Enable IP forwarding, install policy route, and load the nftables ruleset."""
         logger.info("vm=%s activating direct egress", vm_id)
 
-        # Enable kernel IP forwarding so the orchestrator can route packets.
         await self._run_cmd("sysctl", "-w", "net.ipv4.ip_forward=1")
 
-        # Build the ruleset and load it atomically via a temp file.
+        await add_policy_route(
+            self._run_cmd,
+            table_id=_TABLE_ID,
+            sandbox_cidr=self._sandbox_cidr,
+            uplink_iface=self._uplink,
+            gateway=self._gateway,
+            rule_priority=_RULE_PRIORITY,
+        )
+
         ruleset = self._build_ruleset()
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".nft", delete=False, prefix="detonator-"
@@ -84,14 +100,12 @@ class DirectEgressProvider(EgressProvider):
             Path(ruleset_path).unlink(missing_ok=True)
 
     async def deactivate(self, vm_id: str) -> None:
-        """Remove the nftables table. Idempotent — safe to call when not active."""
+        """Remove the nftables table and policy route. Idempotent."""
         logger.info("vm=%s deactivating direct egress", vm_id)
         rc, _, stderr = await self._run_cmd(
             "nft", "delete", "table", "ip", _TABLE, check=False
         )
         if rc != 0:
-            # rc=1 with "No such file or directory" / "table not found" means the
-            # table was already absent — that is the desired post-condition.
             msg = stderr.strip().lower()
             if "no such file" in msg or "table not found" in msg or "no table found" in msg:
                 logger.debug("nftables table %r already absent", _TABLE)
@@ -99,6 +113,13 @@ class DirectEgressProvider(EgressProvider):
                 logger.warning(
                     "nft delete table returned unexpected rc=%d: %s", rc, stderr.strip()
                 )
+
+        await remove_policy_route(
+            self._run_cmd,
+            table_id=_TABLE_ID,
+            sandbox_cidr=self._sandbox_cidr,
+            rule_priority=_RULE_PRIORITY,
+        )
 
     async def preflight_check(self, vm_id: str) -> PreflightResult:
         """Verify the egress path by confirming the orchestrator has a public IP."""
