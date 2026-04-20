@@ -108,7 +108,7 @@ class AgentManager:
     async def wait_for_terminal(
         self,
         *,
-        timeout_sec: float,
+        timeout_sec: float | None,
         poll_sec: float = 2.0,
         pause_on_interactive: bool = False,
     ) -> AgentStatus:
@@ -117,13 +117,16 @@ class AgentManager:
         Terminal states: `complete`, `error`. If ``pause_on_interactive`` is
         True, returns when state becomes `paused` so the orchestrator can
         hold for analyst takeover before calling :meth:`resume`.
+
+        Pass ``timeout_sec=None`` to poll indefinitely (analyst-paced interactive runs).
         """
         terminal = {"complete", "error"}
         if pause_on_interactive:
             terminal = terminal | {"paused"}
 
-        deadline = asyncio.get_event_loop().time() + timeout_sec
-        while asyncio.get_event_loop().time() < deadline:
+        loop = asyncio.get_event_loop()
+        deadline = (loop.time() + timeout_sec) if timeout_sec is not None else None
+        while deadline is None or loop.time() < deadline:
             st = await self.status()
             if st.state in terminal:
                 return st

@@ -282,6 +282,11 @@ def _register_routes(app: FastAPI) -> None:
         transitions = _read_transitions(deps, str(run_id))
         console_url = None
         runner = deps.get_runner(run_id)
+        can_resume = (
+            row.get("status") == "interactive"
+            and runner is not None
+            and runner.record.config.interactive
+        )
         if row.get("status") == "interactive" and runner is not None:
             vm_id = runner.record.config.vm_id or runner.agent.vm_id
             try:
@@ -312,6 +317,7 @@ def _register_routes(app: FastAPI) -> None:
                 "artifacts": artifacts,
                 "transitions": transitions,
                 "console_url": console_url,
+                "can_resume": can_resume,
                 "manifest": manifest,
                 "enrichment": enrichment,
                 "technique_matches": technique_matches,

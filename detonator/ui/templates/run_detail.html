@@ -46,11 +46,13 @@
   </article>
 </section>
 
-{% if console_url %}
+{% if can_resume %}
 <section>
   <article class="card" style="border-left:3px solid var(--pico-primary)">
     <strong>Interactive mode</strong> — agent is paused for analyst takeover.
+    {% if console_url %}
     <p><a href="{{ console_url }}" target="_blank" rel="noopener">Open VM console →</a></p>
+    {% endif %}
     <form method="post" action="/ui/runs/{{ run.id }}/resume" style="display:inline">
       <button type="submit">Resume run</button>
     </form>

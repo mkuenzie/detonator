@@ -20,6 +20,7 @@ been captured preserved on disk.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -301,9 +302,15 @@ class Runner:
             if self.record.config.interactive:
                 await self._handle_interactive_pause(agent)
 
-            async with asyncio.timeout(self.config.timeouts.detonate_sec):
+            interactive = self.record.config.interactive
+            timeout_ctx = (
+                contextlib.nullcontext()
+                if interactive
+                else asyncio.timeout(self.config.timeouts.detonate_sec)
+            )
+            async with timeout_ctx:
                 final = await agent.wait_for_terminal(
-                    timeout_sec=self.config.timeouts.detonate_sec,
+                    timeout_sec=None if interactive else self.config.timeouts.detonate_sec,
                     poll_sec=2.0,
                 )
 
@@ -322,9 +329,10 @@ class Runner:
 
     async def _handle_interactive_pause(self, agent: AgentManager) -> None:
         """Wait for the agent to enter `paused`, then block until resume is signaled."""
-        # First, poll until the agent says it's paused (analyst takeover ready).
+        # Poll until the agent says it's paused (analyst takeover ready).
+        # No timeout — the analyst controls pacing in interactive mode.
         st = await agent.wait_for_terminal(
-            timeout_sec=self.config.timeouts.detonate_sec,
+            timeout_sec=None,
             poll_sec=2.0,
             pause_on_interactive=True,
         )
