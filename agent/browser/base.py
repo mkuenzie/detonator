@@ -72,3 +72,8 @@ class BrowserModule(ABC):
     @abstractmethod
     async def close(self) -> None:
         """Shut down the browser and release resources."""
+
+    @property
+    def is_paused(self) -> bool:
+        """True while the browser is holding for analyst takeover."""
+        return False

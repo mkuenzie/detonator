@@ -128,6 +128,10 @@ class PlaywrightChromiumModule(BrowserModule):
             meta=self._build_meta(),
         )
 
+    @property
+    def is_paused(self) -> bool:
+        return not self._paused.is_set()
+
     async def pause(self) -> None:
         self._paused.clear()
 

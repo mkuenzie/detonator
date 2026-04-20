@@ -65,9 +65,29 @@ class _AgentRuntime:
         self.result = None
         self.artifact_dir = Path(tempfile.mkdtemp(prefix="detonator_"))
 
+        async def _pause_monitor() -> None:
+            """Reflect browser pause/resume into agent state so the host can poll it."""
+            while True:
+                await asyncio.sleep(0.5)
+                if self.browser and self.browser.is_paused:
+                    self.state = AgentState.PAUSED
+                elif self.state == AgentState.PAUSED:
+                    self.state = AgentState.RUNNING
+
         try:
             await self.browser.launch(self.artifact_dir)
-            self.result = await self.browser.detonate(request)
+            monitor = (
+                asyncio.create_task(_pause_monitor()) if request.interactive else None
+            )
+            try:
+                self.result = await self.browser.detonate(request)
+            finally:
+                if monitor:
+                    monitor.cancel()
+                    try:
+                        await monitor
+                    except asyncio.CancelledError:
+                        pass
             if self.result.error:
                 self.state = AgentState.ERROR
                 self.error = self.result.error
