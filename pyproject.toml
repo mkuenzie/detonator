@@ -16,6 +16,9 @@ dependencies = [
     "pydantic>=2.7",
 ]
 
+[project.scripts]
+detonator-egress = "detonator.egress_ctl:main"
+
 [project.optional-dependencies]
 proxmox = ["proxmoxer>=2.0", "requests>=2.31"]
 enrichment = [
