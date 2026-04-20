@@ -100,6 +100,28 @@ class TetherEgressProvider(EgressProvider):
             rule_priority=_RULE_PRIORITY,
         )
 
+        # The preflight (and get_public_ip) sources HTTP requests from the
+        # tether interface's own IP, not from the sandbox CIDR, so it misses
+        # the sandbox policy rule and falls to the main table which deliberately
+        # has no tether default route.  A second rule steers tether-sourced
+        # traffic through table 101 as well.
+        uplink_cidr = self._get_uplink_cidr()
+        if uplink_cidr:
+            await add_policy_route(
+                self._run_cmd,
+                table_id=_TABLE_ID,
+                sandbox_cidr=uplink_cidr,
+                uplink_iface=self._uplink,
+                gateway=self._gateway,
+                rule_priority=_RULE_PRIORITY - 1,  # slightly higher priority; same table
+            )
+        else:
+            logger.warning(
+                "tether uplink %r has no IPv4 lease yet; "
+                "preflight public-IP check will likely fail",
+                self._uplink,
+            )
+
         ruleset = self._build_ruleset()
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".nft", delete=False, prefix="detonator-tether-"
@@ -114,7 +136,7 @@ class TetherEgressProvider(EgressProvider):
             Path(ruleset_path).unlink(missing_ok=True)
 
     async def deactivate(self, vm_id: str) -> None:
-        """Remove the nftables table and policy route. Idempotent."""
+        """Remove the nftables table and policy routes. Idempotent."""
         logger.info("vm=%s deactivating tether egress", vm_id)
         rc, _, stderr = await self._run_cmd(
             "nft", "delete", "table", "ip", _TABLE, check=False
@@ -128,12 +150,22 @@ class TetherEgressProvider(EgressProvider):
                     "nft delete table returned unexpected rc=%d: %s", rc, stderr.strip()
                 )
 
+        # Remove sandbox rule first, then flush the table once (covers both rules' routes).
         await remove_policy_route(
             self._run_cmd,
             table_id=_TABLE_ID,
             sandbox_cidr=self._sandbox_cidr,
             rule_priority=_RULE_PRIORITY,
         )
+        # Remove the uplink rule if it was installed; best-effort, ignore absent.
+        uplink_cidr = self._get_uplink_cidr()
+        if uplink_cidr:
+            await remove_policy_route(
+                self._run_cmd,
+                table_id=_TABLE_ID,
+                sandbox_cidr=uplink_cidr,
+                rule_priority=_RULE_PRIORITY - 1,
+            )
 
     async def preflight_check(self, vm_id: str) -> PreflightResult:
         """Verify the tether uplink has an IPv4 lease, then confirm public IP."""
@@ -178,6 +210,11 @@ class TetherEgressProvider(EgressProvider):
 
     def _get_uplink_ipv4(self) -> str | None:
         """Return the first IPv4 address on the uplink interface, or None."""
+        cidr = self._get_uplink_cidr()
+        return cidr.split("/")[0] if cidr else None
+
+    def _get_uplink_cidr(self) -> str | None:
+        """Return the first IPv4 address with prefix length (e.g. '172.20.10.2/28'), or None."""
         try:
             import subprocess  # noqa: PLC0415
 
@@ -190,7 +227,7 @@ class TetherEgressProvider(EgressProvider):
             # output: "enxXXX  UP  172.20.10.2/28 "
             for token in out.split():
                 if "/" in token:
-                    return token.split("/")[0]
+                    return token
         except Exception:
             pass
 

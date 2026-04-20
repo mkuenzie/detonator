@@ -107,7 +107,7 @@ async def test_ruleset_uses_tether_table_name(provider):
 
 
 async def test_activate_calls_sysctl_and_nft(provider):
-    """activate() must enable IP forwarding, install policy route, and load the nftables ruleset."""
+    """activate() must enable IP forwarding, install policy routes, and load the nftables ruleset."""
     calls: list[tuple[str, ...]] = []
 
     async def fake_run(*args: str, check: bool = True) -> tuple[int, str, str]:
@@ -115,6 +115,7 @@ async def test_activate_calls_sysctl_and_nft(provider):
         return 0, "", ""
 
     provider._run_cmd = fake_run  # type: ignore[method-assign]
+    provider._get_uplink_cidr = lambda: "172.20.10.2/28"  # type: ignore[method-assign]
     await provider.activate("100")
 
     cmds = [" ".join(c) for c in calls]
@@ -127,7 +128,29 @@ async def test_activate_calls_sysctl_and_nft(provider):
     assert any(
         "ip" in c and "rule" in c and "add" in c and "192.168.100.0/24" in c for c in cmds
     ), "ip rule add from sandbox not called"
+    assert any(
+        "ip" in c and "rule" in c and "add" in c and "172.20.10.2/28" in c for c in cmds
+    ), "ip rule add from uplink cidr not called"
     assert any("nft" in c and "-f" in c for c in cmds), "nft -f <ruleset> not called"
+
+
+async def test_activate_skips_uplink_rule_when_no_lease(provider):
+    """activate() must not raise when the uplink has no lease yet; logs a warning instead."""
+    calls: list[tuple[str, ...]] = []
+
+    async def fake_run(*args: str, check: bool = True) -> tuple[int, str, str]:
+        calls.append(args)
+        return 0, "", ""
+
+    provider._run_cmd = fake_run  # type: ignore[method-assign]
+    provider._get_uplink_cidr = lambda: None  # type: ignore[method-assign]
+    await provider.activate("100")  # must not raise
+
+    cmds = [" ".join(c) for c in calls]
+    # Sandbox rule must still be installed.
+    assert any(
+        "ip" in c and "rule" in c and "add" in c and "192.168.100.0/24" in c for c in cmds
+    ), "sandbox policy rule not installed even without uplink lease"
 
 
 # ── deactivate ───────────────────────────────────────────────────
@@ -141,6 +164,7 @@ async def test_deactivate_deletes_table(provider):
         return 0, "", ""
 
     provider._run_cmd = fake_run  # type: ignore[method-assign]
+    provider._get_uplink_cidr = lambda: "172.20.10.2/28"  # type: ignore[method-assign]
     await provider.deactivate("100")
 
     cmds = [" ".join(a) for a in calls]
@@ -164,6 +188,7 @@ async def test_deactivate_is_idempotent_when_table_absent(provider):
         return 0, "", ""
 
     provider._run_cmd = fake_run  # type: ignore[method-assign]
+    provider._get_uplink_cidr = lambda: "172.20.10.2/28"  # type: ignore[method-assign]
     await provider.deactivate("100")
 
 
@@ -178,6 +203,7 @@ async def test_deactivate_is_idempotent_when_route_absent(provider):
         return 0, "", ""
 
     provider._run_cmd = fake_run  # type: ignore[method-assign]
+    provider._get_uplink_cidr = lambda: "172.20.10.2/28"  # type: ignore[method-assign]
     await provider.deactivate("100")
 
 
