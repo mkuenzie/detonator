@@ -51,6 +51,7 @@ class ChainResult(BaseModel):
     chain_entries: list[HarEntry]
     noise_entries: list[HarEntry]
     har_chain: dict                 # minimal HAR dict (chain entries only)
+    har_all: dict = {}              # full raw HAR (all entries) — used by filter to include orphans
 
 
 # ── HAR parsing ──────────────────────────────────────────────────────
@@ -231,4 +232,5 @@ def extract_chain(har_path: Path, seed_url: str) -> ChainResult | None:
         chain_entries=chain_entries,
         noise_entries=noise_entries,
         har_chain=har_chain,
+        har_all=raw_data,
     )

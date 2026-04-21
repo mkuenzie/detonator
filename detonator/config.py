@@ -64,6 +64,11 @@ class FilterConfig(BaseModel):
     noise_domains: list[str] = []
     # Additional resource types to classify as noise (supplements built-ins).
     noise_resource_types: list[str] = []
+    # When False (default) orphan entries (not reachable via initiator graph) are
+    # kept in har_chain.json — JS main-frame navigations produce orphans but their
+    # bodies are still valuable for analysis.  Set True to restore the old behavior
+    # that excludes them.
+    require_initiator_chain: bool = False
 
 
 class EnricherConfig(BaseModel):
@@ -75,7 +80,7 @@ class EnricherConfig(BaseModel):
 class EnrichmentConfig(BaseModel):
     """Enrichment pipeline configuration."""
 
-    modules: list[str] = Field(default=["whois", "dns", "tls", "favicon"])
+    modules: list[str] = Field(default=["whois", "dns", "tls", "favicon", "navigations"])
     whois: EnricherConfig = EnricherConfig()
     dns: EnricherConfig = EnricherConfig()
     tls: EnricherConfig = EnricherConfig()

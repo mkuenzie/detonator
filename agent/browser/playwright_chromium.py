@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ class PlaywrightChromiumModule(BrowserModule):
         self._page: Any = None
         self._artifact_dir: Path | None = None
         self._console_messages: list[dict] = []
+        self._navigations: list[dict] = []
         self._paused: asyncio.Event = asyncio.Event()
         self._paused.set()  # not paused initially
 
@@ -50,6 +52,7 @@ class PlaywrightChromiumModule(BrowserModule):
 
         har_path = self._artifact_dir / "har_full.har"
         self._console_messages = []
+        self._navigations = []
 
         self._context = await self._browser.new_context(
             record_har_path=str(har_path),
@@ -60,6 +63,15 @@ class PlaywrightChromiumModule(BrowserModule):
 
         self._page.on("console", self._on_console)
         self._page.on("pageerror", self._on_page_error)
+
+        def _on_framenavigated(frame: Any) -> None:
+            self._navigations.append({
+                "timestamp": datetime.now(UTC).isoformat(),
+                "url": frame.url,
+                "frame": "main" if frame == self._page.main_frame else "sub",
+            })
+
+        self._page.on("framenavigated", _on_framenavigated)
 
         screenshot_paths: list[Path] = []
         screenshot_task = None
@@ -111,6 +123,11 @@ class PlaywrightChromiumModule(BrowserModule):
         dom_content = await self._page.evaluate("document.documentElement.outerHTML")
         dom_path.write_text(dom_content, encoding="utf-8")
 
+        navigations_path = self._artifact_dir / "navigations.json"
+        navigations_path.write_text(
+            json.dumps(self._navigations, indent=2), encoding="utf-8"
+        )
+
         console_path = self._artifact_dir / "console.json"
         console_path.write_text(
             json.dumps(self._console_messages, indent=2), encoding="utf-8"
@@ -124,6 +141,7 @@ class PlaywrightChromiumModule(BrowserModule):
             har_path=har_path,
             screenshot_paths=screenshot_paths,
             dom_path=dom_path,
+            navigations_path=navigations_path,
             console_log_path=console_path,
             meta=self._build_meta(),
         )

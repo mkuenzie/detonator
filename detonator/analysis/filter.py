@@ -34,6 +34,41 @@ REASON_NO_CHAIN = "not_in_initiator_chain"
 REASON_TRACKER = "known_tracking_domain"
 REASON_RESOURCE_TYPE = "noise_resource_type"
 
+# Built-in tracker domain list — user list supplements, not replaces these.
+_DEFAULT_NOISE_DOMAINS: frozenset[str] = frozenset({
+    "google-analytics.com",
+    "googletagmanager.com",
+    "googletagservices.com",
+    "doubleclick.net",
+    "googlesyndication.com",
+    "facebook.net",
+    "connect.facebook.net",
+    "hotjar.com",
+    "segment.com",
+    "segment.io",
+    "intercom.io",
+    "intercomassets.com",
+    "bat.bing.com",
+    "mc.yandex.ru",
+    "yandex.ru",
+    "analytics.tiktok.com",
+    "ads.linkedin.com",
+    "snap.licdn.com",
+    "cdn.amplitude.com",
+    "api.amplitude.com",
+    "mixpanel.com",
+    "heapanalytics.com",
+    "cdn.heapanalytics.com",
+})
+
+# Built-in noise resource types — HAR _resourceType values that are always noise.
+_DEFAULT_NOISE_RTYPES: frozenset[str] = frozenset({
+    "ping",
+    "preflight",
+    "csp-violation-report",
+    "beacon",
+})
+
 
 # ── Output models ────────────────────────────────────────────────
 
@@ -41,6 +76,7 @@ REASON_RESOURCE_TYPE = "noise_resource_type"
 class FilterEntry(BaseModel):
     url: str
     is_noise: bool
+    is_chain: bool = False   # True when reachable from seed via initiator graph
     reasons: list[str] = []
 
 
@@ -69,20 +105,33 @@ class NoiseFilter:
 
     *noise_domains* supplements (does not replace) the built-in default
     list.  Pass an empty list to use defaults only.
+
+    When *require_initiator_chain* is False (the default) entries that are not
+    reachable from the seed URL via the initiator graph are still kept — they
+    receive ``is_chain=False`` but are not marked as noise.  Set it to True to
+    restore the old behavior where orphan entries are always noise.
     """
 
     def __init__(
         self,
         noise_domains: list[str] | None = None,
         noise_resource_types: list[str] | None = None,
+        require_initiator_chain: bool = False,
     ) -> None:
-        self._noise_domains: frozenset[str] = frozenset(noise_domains or [])
-        self._noise_rtypes: frozenset[str] = frozenset(noise_resource_types or [])
+        self._noise_domains: frozenset[str] = _DEFAULT_NOISE_DOMAINS | frozenset(noise_domains or [])
+        self._noise_rtypes: frozenset[str] = _DEFAULT_NOISE_RTYPES | frozenset(noise_resource_types or [])
+        self._require_chain = require_initiator_chain
 
-    def _classify(self, entry: HarEntry, chain_url_set: set[str]) -> list[str]:
+    def _classify(self, entry: HarEntry, chain_url_set: set[str]) -> tuple[list[str], bool]:
+        """Return (reasons, in_chain).
+
+        *in_chain* is True when the entry is reachable from the seed URL via
+        the initiator graph regardless of whether it is ultimately noise.
+        """
         reasons: list[str] = []
+        in_chain = entry.url in chain_url_set
 
-        if entry.url not in chain_url_set:
+        if not in_chain and self._require_chain:
             reasons.append(REASON_NO_CHAIN)
 
         host = _netloc(entry.url).removeprefix("www.")
@@ -94,15 +143,15 @@ class NoiseFilter:
         if entry.resource_type in self._noise_rtypes:
             reasons.append(REASON_RESOURCE_TYPE)
 
-        return reasons
+        return reasons, in_chain
 
     def run(self, chain_result: ChainResult, run_id: str) -> FilterResult:
         """Classify all entries and produce a :class:`FilterResult`.
 
         ``har_chain`` in the result is the final filtered HAR dict that
-        should be written as ``har_chain.json``.  It contains only the
-        requests that are in the initiator chain *and* not classified as
-        noise.
+        should be written as ``har_chain.json``.  It contains all non-noise
+        entries — including initiator-graph orphans when
+        ``require_initiator_chain`` is False (the default).
         """
         chain_url_set = set(chain_result.chain_urls)
 
@@ -110,23 +159,28 @@ class NoiseFilter:
         clean_urls: set[str] = set()
 
         for e in chain_result.all_entries:
-            reasons = self._classify(e, chain_url_set)
+            reasons, in_chain = self._classify(e, chain_url_set)
             is_noise = bool(reasons)
-            filter_entries.append(FilterEntry(url=e.url, is_noise=is_noise, reasons=reasons))
+            filter_entries.append(
+                FilterEntry(url=e.url, is_noise=is_noise, is_chain=in_chain, reasons=reasons)
+            )
             if not is_noise:
                 clean_urls.add(e.url)
 
         chain_count = len(clean_urls)
         noise_count = len(filter_entries) - chain_count
 
-        # Build final filtered HAR (clean chain only)
-        raw_entries = chain_result.har_chain.get("log", {}).get("entries", [])
+        # Build final filtered HAR.  When orphans are allowed (the default),
+        # start from the full HAR so orphan entries that are not noise appear in
+        # the output; otherwise restrict to the initiator-chain subset.
+        source_har = chain_result.har_all if (chain_result.har_all and not self._require_chain) else chain_result.har_chain
+        raw_entries = source_har.get("log", {}).get("entries", [])
         final_raw = [
             e for e in raw_entries
             if e.get("request", {}).get("url", "") in clean_urls
         ]
-        log_section = {**chain_result.har_chain.get("log", {}), "entries": final_raw}
-        har_chain_final = {**chain_result.har_chain, "log": log_section}
+        log_section = {**source_har.get("log", {}), "entries": final_raw}
+        har_chain_final = {**source_har, "log": log_section}
 
         logger.info(
             "run=%s chain filter: total=%d chain=%d noise=%d",

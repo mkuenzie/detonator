@@ -383,6 +383,8 @@ class Runner:
         lower = name.lower()
         if lower.startswith("screenshots/") or lower.endswith((".png", ".jpg", ".jpeg")):
             return "screenshot"
+        if lower.endswith("navigations.json"):
+            return "navigations"
         if "har" in lower and lower.endswith((".har", ".json")):
             return "har_full"
         if lower.endswith("dom.html") or lower.endswith(".html"):
@@ -445,6 +447,7 @@ class Runner:
         noise_filter = NoiseFilter(
             noise_domains=self.config.filter.noise_domains,
             noise_resource_types=self.config.filter.noise_resource_types,
+            require_initiator_chain=self.config.filter.require_initiator_chain,
         )
         filter_result = noise_filter.run(chain_result, str(self.record.id))
 
@@ -479,12 +482,14 @@ class Runner:
         # Run analysis pipeline against the noise-filtered chain
         technique_hits = []
         if self.analysis_pipeline is not None:
+            artifacts = await self.database.get_artifacts(str(self.record.id))
             ctx = AnalysisContext.from_chain(
                 chain_result,
                 filter_result,
                 artifact_dir,
                 str(self.record.id),
                 self.record.config.url,
+                artifacts=artifacts,
             )
             technique_hits = await self.analysis_pipeline.run(ctx)
 

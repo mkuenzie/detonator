@@ -30,7 +30,7 @@ from typing import Any
 
 import yaml
 
-from detonator.analysis.modules.base import AnalysisContext, AnalysisModule, TechniqueHit, _tech_id
+from detonator.analysis.modules.base import AnalysisContext, AnalysisModule, ResourceContent, TechniqueHit, _tech_id
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,30 @@ _FIELD_MAP: dict[str, str] = {
     "chain.redirect_domains": "redirect_domains",
     "chain.cross_origin_redirect_count": "cross_origin_redirect_count",
     "dom.html": "dom_html",
+    # Resource fields — evaluated per ResourceContent object, not against the whole context
+    "resource.url":       "resources[].url",
+    "resource.host":      "resources[].host",
+    "resource.mime_type": "resources[].mime_type",
+    "resource.body":      "resources[].body",
 }
+
+# Attribute names that resolve against individual ResourceContent objects
+_RESOURCE_ATTR_MAP: dict[str, str] = {
+    "resources[].url":       "url",
+    "resources[].host":      "host",
+    "resources[].mime_type": "mime_type",
+    "resources[].body":      "body",
+}
+
+
+def _references_resource_fields(rule: _ParsedRule) -> bool:
+    """Return True if any selection in *rule* references a resource.* field."""
+    resource_mapped = set(_RESOURCE_ATTR_MAP)
+    for predicates in rule.selections.values():
+        for field, _mod, _val in predicates:
+            if _FIELD_MAP.get(field) in resource_mapped:
+                return True
+    return False
 
 
 # ── Rule representation ──────────────────────────────────────────────
@@ -213,9 +236,21 @@ def _load_rules_from_dirs(rules_dirs: list[str]) -> list[_ParsedRule]:
 # ── Evaluator ─────────────────────────────────────────────────────────
 
 
-def _resolve_field(context: AnalysisContext, field: str) -> Any:
-    """Return the context attribute for a dotted field path."""
+def _resolve_field(
+    context: AnalysisContext,
+    field: str,
+    resource: ResourceContent | None = None,
+) -> Any:
+    """Return the value for a dotted field path.
+
+    For ``resource.*`` fields, resolves against *resource* when provided;
+    returns None otherwise (rule will not match).
+    """
     attr = _FIELD_MAP[field]
+    if attr in _RESOURCE_ATTR_MAP:
+        if resource is None:
+            return None
+        return getattr(resource, _RESOURCE_ATTR_MAP[attr], None)
     return getattr(context, attr, None)
 
 
@@ -249,9 +284,10 @@ def _eval_predicate(
     field: str,
     modifier: str | None,
     rule_value: Any,
+    resource: ResourceContent | None = None,
 ) -> tuple[bool, list[Any]]:
     """Evaluate one predicate; returns (matched, matched_values)."""
-    ctx_value = _resolve_field(context, field)
+    ctx_value = _resolve_field(context, field, resource)
 
     # Normalise rule_value to a list for OR semantics
     rule_values = rule_value if isinstance(rule_value, list) else [rule_value]
@@ -278,11 +314,12 @@ def _eval_predicate(
 def _eval_selection(
     context: AnalysisContext,
     selection: list[tuple[str, str | None, Any]],
+    resource: ResourceContent | None = None,
 ) -> tuple[bool, dict[str, list[Any]]]:
     """Evaluate a selection (AND of all predicates); returns (matched, evidence_dict)."""
     evidence: dict[str, list[Any]] = {}
     for field, modifier, rule_value in selection:
-        matched, matched_values = _eval_predicate(context, field, modifier, rule_value)
+        matched, matched_values = _eval_predicate(context, field, modifier, rule_value, resource)
         if not matched:
             return False, {}
         evidence[field] = matched_values
@@ -297,6 +334,7 @@ def _eval_condition(
     condition: str,
     selections: dict[str, list[tuple[str, str | None, Any]]],
     context: AnalysisContext,
+    resource: ResourceContent | None = None,
 ) -> tuple[bool, dict[str, list[Any]]]:
     """Evaluate the condition expression; returns (matched, accumulated_evidence)."""
     tokens = _COND_TOKEN.findall(condition)
@@ -331,7 +369,7 @@ def _eval_condition(
         sel = selections.get(t)
         if sel is None:
             return False
-        matched, evidence = _eval_selection(context, sel)
+        matched, evidence = _eval_selection(context, sel, resource)
         if matched:
             accumulated_evidence.update(evidence)
         return matched
@@ -374,9 +412,44 @@ class SigmaModule(AnalysisModule):
 
         for rule in self._rules:
             try:
-                matched, evidence = _eval_condition(
-                    rule.condition, rule.selections, context
-                )
+                if _references_resource_fields(rule):
+                    # Evaluate once per resource; emit one hit per match
+                    for resource in context.resources:
+                        matched, evidence = _eval_condition(
+                            rule.condition, rule.selections, context, resource
+                        )
+                        if matched:
+                            hits.append(
+                                TechniqueHit(
+                                    technique_id=rule.rule_id,
+                                    name=rule.title,
+                                    description=rule.description,
+                                    signature_type=rule.signature_type,
+                                    confidence=rule.confidence,
+                                    evidence={
+                                        **evidence,
+                                        "resource_url": resource.url,
+                                        "mime_type": resource.mime_type,
+                                    },
+                                    detection_module="sigma",
+                                )
+                            )
+                else:
+                    matched, evidence = _eval_condition(
+                        rule.condition, rule.selections, context
+                    )
+                    if matched:
+                        hits.append(
+                            TechniqueHit(
+                                technique_id=rule.rule_id,
+                                name=rule.title,
+                                description=rule.description,
+                                signature_type=rule.signature_type,
+                                confidence=rule.confidence,
+                                evidence=evidence,
+                                detection_module="sigma",
+                            )
+                        )
             except Exception as exc:
                 logger.warning(
                     "run=%s sigma: error evaluating rule %r: %s",
@@ -385,19 +458,6 @@ class SigmaModule(AnalysisModule):
                     exc,
                 )
                 continue
-
-            if matched:
-                hits.append(
-                    TechniqueHit(
-                        technique_id=rule.rule_id,
-                        name=rule.title,
-                        description=rule.description,
-                        signature_type=rule.signature_type,
-                        confidence=rule.confidence,
-                        evidence=evidence,
-                        detection_module="sigma",
-                    )
-                )
 
         logger.debug(
             "run=%s sigma: %d hit(s) from %d rule(s)",

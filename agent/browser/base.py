@@ -26,6 +26,7 @@ class DetonationResult(BaseModel):
     screenshot_paths: list[Path] = []
     dom_path: Path | None = None
     console_log_path: Path | None = None
+    navigations_path: Path | None = None
     meta: dict[str, Any] = {}
     error: str | None = None
 

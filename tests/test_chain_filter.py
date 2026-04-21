@@ -341,13 +341,15 @@ def test_noise_filter_resource_type_ping(tmp_path: Path) -> None:
 
 
 def test_noise_filter_no_chain(tmp_path: Path) -> None:
+    """Orphan entries are NOT noise by default (Phase A: require_initiator_chain=False)."""
     result = extract_chain(_write_har(tmp_path), SEED_URL)
     nf = NoiseFilter()
     fr = nf.run(result, "run-1")  # type: ignore[arg-type]
 
     orphan = next(e for e in fr.entries if "cdn.unrelated.com" in e.url)
-    assert orphan.is_noise is True
-    assert REASON_NO_CHAIN in orphan.reasons
+    assert orphan.is_noise is False
+    assert orphan.is_chain is False
+    assert REASON_NO_CHAIN not in orphan.reasons
 
 
 def test_noise_filter_chain_entries_clean(tmp_path: Path) -> None:
@@ -369,9 +371,10 @@ def test_noise_filter_counts(tmp_path: Path) -> None:
     fr = nf.run(result, "run-1")  # type: ignore[arg-type]
 
     assert fr.total_requests == 7
-    # GA + ping + unrelated = 3 noise
-    assert fr.noise_requests == 3
-    assert fr.chain_requests == 4
+    # GA (tracker domain) + ping (noise resource type) = 2 noise
+    # cdn.unrelated.com is an orphan but NOT noise by default
+    assert fr.noise_requests == 2
+    assert fr.chain_requests == 5
 
 
 def test_noise_filter_extra_domain_config(tmp_path: Path) -> None:
@@ -394,10 +397,11 @@ def test_noise_filter_har_chain_excludes_noise(tmp_path: Path) -> None:
         e.get("request", {}).get("url")
         for e in fr.har_chain.get("log", {}).get("entries", [])
     }
-    # GA filtered, tracker.net filtered, cdn.unrelated.com filtered
+    # GA (tracker) and ping (resource type) are filtered
     assert "https://www.google-analytics.com/collect?v=1" not in final_urls
     assert "https://tracker.example.net/ping" not in final_urls
-    assert "https://cdn.unrelated.com/lib.js" not in final_urls
+    # cdn.unrelated.com is an orphan but NOT noise — appears in output HAR
+    assert "https://cdn.unrelated.com/lib.js" in final_urls
     # Phishing chain URLs present
     assert SEED_URL in final_urls
     assert "https://phish.evil.example.com/landing" in final_urls
@@ -420,3 +424,45 @@ async def test_filter_result_json_serialisable(tmp_path: Path) -> None:
     assert reloaded["run_id"] == "run-1"
     assert reloaded["seed_url"] == SEED_URL
     assert isinstance(reloaded["entries"], list)
+
+
+# ── Phase A: require_initiator_chain behavior ─────────────────────────
+
+
+def test_orphan_url_not_marked_noise_by_default(tmp_path: Path) -> None:
+    """Orphan entries should NOT be noise when require_initiator_chain is False."""
+    result = extract_chain(_write_har(tmp_path), SEED_URL)
+    nf = NoiseFilter()  # require_initiator_chain=False by default
+    fr = nf.run(result, "run-1")  # type: ignore[arg-type]
+
+    orphan = next(e for e in fr.entries if "cdn.unrelated.com" in e.url)
+    assert orphan.is_noise is False
+    assert REASON_NO_CHAIN not in orphan.reasons
+
+
+def test_require_initiator_chain_preserves_old_behavior(tmp_path: Path) -> None:
+    """With require_initiator_chain=True, orphans are still classified as noise."""
+    result = extract_chain(_write_har(tmp_path), SEED_URL)
+    nf = NoiseFilter(require_initiator_chain=True)
+    fr = nf.run(result, "run-1")  # type: ignore[arg-type]
+
+    orphan = next(e for e in fr.entries if "cdn.unrelated.com" in e.url)
+    assert orphan.is_noise is True
+    assert REASON_NO_CHAIN in orphan.reasons
+    # Old counts: GA + ping + orphan = 3 noise, 4 chain
+    assert fr.noise_requests == 3
+    assert fr.chain_requests == 4
+
+
+def test_is_chain_flag_set_for_reachable_entries(tmp_path: Path) -> None:
+    """is_chain=True on entries reachable from the seed via initiator graph."""
+    result = extract_chain(_write_har(tmp_path), SEED_URL)
+    nf = NoiseFilter()
+    fr = nf.run(result, "run-1")  # type: ignore[arg-type]
+
+    for url in _CHAIN_URLS:
+        entry = next(e for e in fr.entries if e.url == url)
+        assert entry.is_chain is True, f"{url} should have is_chain=True"
+
+    orphan = next(e for e in fr.entries if "cdn.unrelated.com" in e.url)
+    assert orphan.is_chain is False

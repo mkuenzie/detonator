@@ -146,6 +146,8 @@ class EnrichmentPipeline:
             types.extend(["har", "domain", "url"])
         if (artifact_dir / "dom.html").exists():
             types.append("dom")
+        if (artifact_dir / "navigations.json").exists():
+            types.append("navigations")
         return types
 
     async def _persist(
@@ -308,6 +310,9 @@ def _build_enricher(name: str, cfg: EnrichmentConfig) -> Enricher | None:
     if name == "dom":
         from detonator.enrichment.dom import DomExtractor
         return DomExtractor()
+    if name == "navigations":
+        from detonator.enrichment.navigations import NavigationEnricher
+        return NavigationEnricher()
     return None
 
 

@@ -126,7 +126,7 @@ rules_dirs = ["detonator/analysis/rules"]
 # also excludes "fonts.googleapis.com"). Exclusions are PER-ENRICHER: a host
 # excluded from whois still runs through dns/tls/favicon unless listed there too.
 [enrichment]
-modules = ["whois", "dns", "tls", "favicon"]
+modules = ["whois", "dns", "tls", "favicon", "navigations"]
 
 # CDN/cloud/SaaS registrants are always the provider, never the adversary.
 [enrichment.whois]
