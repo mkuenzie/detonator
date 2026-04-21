@@ -50,7 +50,15 @@ scp -r agent/ detonator@<vm-ip>:C:/Users/detonator/agent/
 
 Or use a shared folder, RDP file transfer, or any other method to place the files at `C:\Users\detonator\agent\`.
 
-### 4. Set up the Python environment
+### 4. Install Google Chrome
+
+The agent drives a **real Google Chrome install** (not the Playwright-bundled Chromium) to avoid the build-fingerprint and user-agent tells that cloakers check.
+
+Download and install the latest stable Chrome for Windows from the official source. The installer places Chrome at `C:\Program Files\Google\Chrome\Application\chrome.exe`, which is the path Playwright's `channel="chrome"` resolves to.
+
+If you prefer to keep using the bundled Chromium (e.g. for testing or environments without a Chrome license), set `stealth.enabled = false` in your agent config — this skips the `channel="chrome"` option and falls back to bundled Chromium.
+
+### 5. Set up the Python environment
 
 Open PowerShell as the `detonator` user:
 
@@ -62,7 +70,7 @@ pip install fastapi uvicorn playwright msvc-runtime
 playwright install chromium
 ```
 
-`playwright install chromium` downloads the correct Chromium binary managed by Playwright. No separate Chrome installation is needed.
+`playwright install chromium` installs the Playwright-managed Chromium fallback (used when `stealth.enabled = false`). The real Chrome install from step 4 is used by default.
 
 > **Note:** `msvc-runtime` is required because `playwright`'s `greenlet` dependency (2.0+) links against the Microsoft Visual C++ runtime, which is not present on a fresh Windows install. Without it, `import greenlet` fails with `ImportError: DLL load failed while importing _greenlet: The specified module could not be found`. `msvc-runtime` drops the needed DLLs into the venv — no system-wide VC++ Redistributable installer required.
 

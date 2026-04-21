@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from agent.browser.base import BrowserModule, DetonationRequest, DetonationResult
+from agent.browser.base import BrowserModule, DetonationRequest, DetonationResult, StealthProfile
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ class DetonateBody(BaseModel):
     wait_for_idle: bool = True
     interactive: bool = False
     screenshot_interval_sec: int | None = None
+    stealth: StealthProfile | None = None
 
 
 class StatusResponse(BaseModel):
@@ -127,6 +128,7 @@ async def detonate(body: DetonateBody) -> StatusResponse:
         wait_for_idle=body.wait_for_idle,
         interactive=body.interactive,
         screenshot_interval_sec=body.screenshot_interval_sec,
+        stealth=body.stealth,
     )
     runtime._task = asyncio.create_task(runtime.run_detonation(request))
     return StatusResponse(state=AgentState.RUNNING)

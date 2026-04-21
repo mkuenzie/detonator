@@ -35,6 +35,23 @@ class StorageConfig(BaseModel):
     db_path: str = "data/detonator.db"
 
 
+class StealthConfig(BaseModel):
+    """Fingerprint-hardening settings forwarded to the in-VM agent.
+
+    Mirrors ``agent.browser.base.StealthProfile`` — kept separate so the
+    host package has no import dependency on the agent package.
+    """
+
+    enabled: bool = True
+    user_agent: str | None = None
+    locale: str = "en-US"
+    timezone_id: str = "America/Los_Angeles"
+    viewport_width: int = 1920
+    viewport_height: int = 1080
+    geolocation_lat: float = 45.5051   # Portland, OR
+    geolocation_lon: float = -122.6750
+
+
 class AgentInstanceConfig(BaseModel):
     """A named agent — pairs a VM + snapshot with the agent HTTP endpoint."""
 
@@ -44,6 +61,7 @@ class AgentInstanceConfig(BaseModel):
     port: int = 8000
     health_timeout_sec: int = 60
     health_poll_sec: int = 2
+    stealth: StealthConfig = StealthConfig()
 
 
 class TimeoutsConfig(BaseModel):

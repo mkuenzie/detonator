@@ -296,6 +296,7 @@ class Runner:
                 timeout_sec=self.record.config.timeout_sec,
                 interactive=self.record.config.interactive,
                 screenshot_interval_sec=self.record.config.screenshot_interval_sec,
+                stealth=self.agent.stealth,
             )
 
             if self.record.config.interactive:

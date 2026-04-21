@@ -27,6 +27,21 @@ port = 8000
 health_timeout_sec = 60
 health_poll_sec = 2
 
+# Stealth fingerprint hardening — enabled by default.
+# The agent drives a real Google Chrome install (channel="chrome") with
+# navigator.webdriver removed, plugins shimmed, and WebGL spoofed so that
+# common cloakers (NanoCloak, ClearShield, BlackTDS) serve the real page.
+# Set enabled = false for vanilla Chromium capture (e.g. HAR debugging).
+# user_agent: override the Chrome UA (default: Chrome's own UA from channel="chrome")
+# locale / timezone_id: navigator.language and Intl timezone
+# viewport_width / viewport_height: screen + viewport reported to the page
+# geolocation_lat / geolocation_lon: navigator.geolocation position
+#
+# [agents.stealth] cannot be used here because [[agents]] is an array-of-tables;
+# pass stealth fields as an inline table instead:
+#
+# stealth = { enabled = true, locale = "en-US", timezone_id = "America/Los_Angeles", viewport_width = 1920, viewport_height = 1080, geolocation_lat = 45.5051, geolocation_lon = -122.6750 }
+
 [timeouts]
 provision_sec = 120
 preflight_sec = 30

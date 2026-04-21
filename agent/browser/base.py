@@ -9,6 +9,23 @@ from typing import Any
 from pydantic import BaseModel
 
 
+class StealthProfile(BaseModel):
+    """Fingerprint-hardening options passed to the browser module.
+
+    Stealth is on by default.  Set ``enabled=False`` for vanilla capture
+    (e.g. when debugging a HAR issue).
+    """
+
+    enabled: bool = True
+    user_agent: str | None = None
+    locale: str = "en-US"
+    timezone_id: str = "America/Los_Angeles"
+    viewport_width: int = 1920
+    viewport_height: int = 1080
+    geolocation_lat: float = 45.5051   # Portland, OR
+    geolocation_lon: float = -122.6750
+
+
 class DetonationRequest(BaseModel):
     """Parameters for a browser detonation session."""
 
@@ -17,6 +34,7 @@ class DetonationRequest(BaseModel):
     wait_for_idle: bool = True
     interactive: bool = False
     screenshot_interval_sec: int | None = None
+    stealth: StealthProfile | None = None
 
 
 class DetonationResult(BaseModel):

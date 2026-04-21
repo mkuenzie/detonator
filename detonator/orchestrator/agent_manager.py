@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import Any
 
 import httpx
 from pydantic import BaseModel
@@ -83,14 +84,19 @@ class AgentManager:
         wait_for_idle: bool = True,
         interactive: bool = False,
         screenshot_interval_sec: int | None = None,
+        stealth: Any | None = None,
     ) -> AgentStatus:
-        payload = {
+        payload: dict[str, Any] = {
             "url": url,
             "timeout_sec": timeout_sec,
             "wait_for_idle": wait_for_idle,
             "interactive": interactive,
             "screenshot_interval_sec": screenshot_interval_sec,
         }
+        if stealth is not None:
+            payload["stealth"] = (
+                stealth.model_dump() if hasattr(stealth, "model_dump") else stealth
+            )
         resp = await self.client.post("/detonate", json=payload)
         resp.raise_for_status()
         return AgentStatus(**resp.json())

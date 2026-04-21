@@ -10,17 +10,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agent.browser.base import BrowserModule, DetonationRequest, DetonationResult
+from agent.browser.base import BrowserModule, DetonationRequest, DetonationResult, StealthProfile
 
 logger = logging.getLogger(__name__)
 
+_STEALTH_JS = Path(__file__).parent / "stealth.js"
+
 
 class PlaywrightChromiumModule(BrowserModule):
-    """Browser automation via Playwright driving a headed Chromium instance."""
+    """Browser automation via Playwright driving a real Chrome install.
+
+    Uses launch_persistent_context() so the profile looks like a real user
+    session rather than a freshly-created automation context.  Stealth
+    hardening (navigator.webdriver removal, plugin shimming, WebGL spoofing,
+    etc.) is applied via an init script loaded from stealth.js.
+    """
 
     def __init__(self) -> None:
         self._playwright: Any = None
-        self._browser: Any = None
         self._context: Any = None
         self._page: Any = None
         self._artifact_dir: Path | None = None
@@ -28,37 +35,87 @@ class PlaywrightChromiumModule(BrowserModule):
         self._navigations: list[dict] = []
         self._paused: asyncio.Event = asyncio.Event()
         self._paused.set()  # not paused initially
+        self._stealth_enabled: bool = True
 
     @property
     def name(self) -> str:
         return "playwright_chromium"
 
     async def launch(self, artifact_dir: Path) -> None:
+        """Start Playwright.  The browser itself launches in detonate()."""
         from playwright.async_api import async_playwright
 
         self._artifact_dir = artifact_dir
         self._artifact_dir.mkdir(parents=True, exist_ok=True)
 
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(
-            headless=False,
-            args=["--no-sandbox", "--disable-dev-shm-usage"],
-        )
-        logger.info("Chromium launched (headed)")
+        logger.info("Playwright started (browser launches at detonate time)")
 
     async def detonate(self, request: DetonationRequest) -> DetonationResult:
-        assert self._browser is not None, "call launch() first"
+        assert self._playwright is not None, "call launch() first"
         assert self._artifact_dir is not None
 
         har_path = self._artifact_dir / "har_full.har"
         self._console_messages = []
         self._navigations = []
 
-        self._context = await self._browser.new_context(
-            record_har_path=str(har_path),
-            record_har_content="attach",
-            ignore_https_errors=True,
+        stealth = request.stealth if request.stealth is not None else StealthProfile()
+        self._stealth_enabled = stealth.enabled
+
+        user_data_dir = str(self._artifact_dir / "user-data")
+
+        if stealth.enabled:
+            context_kwargs: dict[str, Any] = dict(
+                channel="chrome",
+                headless=False,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-default-browser-check",
+                    "--no-first-run",
+                    "--password-store=basic",
+                    "--use-mock-keychain",
+                ],
+                ignore_default_args=["--enable-automation", "--enable-logging"],
+                locale=stealth.locale,
+                timezone_id=stealth.timezone_id,
+                viewport={"width": stealth.viewport_width, "height": stealth.viewport_height},
+                screen={"width": stealth.viewport_width, "height": stealth.viewport_height},
+                color_scheme="light",
+                reduced_motion="no-preference",
+                forced_colors="none",
+                extra_http_headers={
+                    "Accept-Language": f"{stealth.locale},{stealth.locale.split('-')[0]};q=0.9"
+                },
+                geolocation={
+                    "latitude": stealth.geolocation_lat,
+                    "longitude": stealth.geolocation_lon,
+                },
+                permissions=["geolocation"],
+                record_har_path=str(har_path),
+                record_har_content="attach",
+                ignore_https_errors=True,
+            )
+            if stealth.user_agent:
+                context_kwargs["user_agent"] = stealth.user_agent
+        else:
+            context_kwargs = dict(
+                headless=False,
+                record_har_path=str(har_path),
+                record_har_content="attach",
+                ignore_https_errors=True,
+            )
+
+        self._context = await self._playwright.chromium.launch_persistent_context(
+            user_data_dir, **context_kwargs
         )
+
+        if stealth.enabled:
+            # Inject locale so stealth.js can use it without hardcoding
+            await self._context.add_init_script(
+                script=f"window.__stealthLocale__ = {json.dumps(stealth.locale)};"
+            )
+            await self._context.add_init_script(path=str(_STEALTH_JS))
+
         self._page = await self._context.new_page()
 
         self._page.on("console", self._on_console)
@@ -159,12 +216,10 @@ class PlaywrightChromiumModule(BrowserModule):
     async def close(self) -> None:
         if self._context:
             await self._context.close()
-        if self._browser:
-            await self._browser.close()
+            self._context = None
         if self._playwright:
             await self._playwright.stop()
-        self._browser = None
-        self._playwright = None
+            self._playwright = None
         logger.info("Chromium closed")
 
     def _on_console(self, msg: Any) -> None:
@@ -184,7 +239,8 @@ class PlaywrightChromiumModule(BrowserModule):
     def _build_meta(self) -> dict[str, Any]:
         return {
             "browser_module": self.name,
-            "browser": "chromium",
+            "browser": "chrome" if self._stealth_enabled else "chromium",
+            "stealth_enabled": self._stealth_enabled,
         }
 
     async def _periodic_screenshots(
