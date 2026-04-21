@@ -496,6 +496,42 @@ class Database:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def get_campaign_detail(self, campaign_id: str) -> dict | None:
+        """Return the full view shape for a campaign: base row + linked runs +
+        linked observables (with role) + linked techniques. Returns ``None`` if
+        not found."""
+        campaign = await self.get_campaign(campaign_id)
+        if campaign is None:
+            return None
+
+        runs_cursor = await self.db.execute(
+            """SELECT r.* FROM runs r
+               JOIN campaign_runs cr ON r.id = cr.run_id
+               WHERE cr.campaign_id = ?
+               ORDER BY r.created_at DESC""",
+            (campaign_id,),
+        )
+        obs_cursor = await self.db.execute(
+            """SELECT o.*, co.role FROM observables o
+               JOIN campaign_observables co ON o.id = co.observable_id
+               WHERE co.campaign_id = ?
+               ORDER BY o.type, o.value""",
+            (campaign_id,),
+        )
+        tech_cursor = await self.db.execute(
+            """SELECT t.* FROM techniques t
+               JOIN campaign_techniques ct ON t.id = ct.technique_id
+               WHERE ct.campaign_id = ?
+               ORDER BY t.name""",
+            (campaign_id,),
+        )
+        return {
+            **campaign,
+            "runs": [dict(r) for r in await runs_cursor.fetchall()],
+            "observables": [dict(r) for r in await obs_cursor.fetchall()],
+            "techniques": [dict(r) for r in await tech_cursor.fetchall()],
+        }
+
     async def link_campaign_run(self, campaign_id: str, run_id: str) -> None:
         await self.db.execute(
             "INSERT OR IGNORE INTO campaign_runs (campaign_id, run_id) VALUES (?, ?)",
@@ -524,3 +560,229 @@ class Database:
             (technique_id, run_id, confidence, json.dumps(evidence) if evidence else None),
         )
         await self.db.commit()
+
+    # ── Graph search & neighborhood ───────────────────────────────
+
+    async def search_graph_nodes(self, query: str, limit: int = 20) -> list[dict]:
+        """Search observables, techniques, and campaigns by value / name.
+
+        Returns a unified list of ``{node_type, id, label, sublabel}`` rows
+        ordered by node_type then label. Case-insensitive substring match.
+        """
+        pattern = f"%{query}%"
+        cursor = await self.db.execute(
+            """SELECT 'observable' AS node_type, id, value AS label, type AS sublabel
+                 FROM observables WHERE value LIKE ? COLLATE NOCASE
+               UNION ALL
+               SELECT 'technique' AS node_type, id, name AS label, signature_type AS sublabel
+                 FROM techniques WHERE name LIKE ? COLLATE NOCASE
+               UNION ALL
+               SELECT 'campaign' AS node_type, id, name AS label, status AS sublabel
+                 FROM campaigns WHERE name LIKE ? COLLATE NOCASE
+                                    OR description LIKE ? COLLATE NOCASE
+               ORDER BY node_type, label
+               LIMIT ?""",
+            (pattern, pattern, pattern, pattern, limit),
+        )
+        return [dict(r) for r in await cursor.fetchall()]
+
+    async def get_node_neighborhood(
+        self, node_type: str, node_id: str
+    ) -> dict | None:
+        """Return a normalized 1-hop neighborhood for a graph node.
+
+        Node types: ``observable``, ``technique``, ``campaign``. Runs are
+        intentionally excluded from the graph (see CLAUDE.md graph MVP scope).
+        Returns ``{center, neighbors, edges}`` or ``None`` if the node does
+        not exist. Each node entry is ``{node_type, id, label, sublabel}``;
+        each edge is ``{source, target, edge_type, confidence}``.
+        """
+        if node_type == "observable":
+            return await self._observable_neighborhood(node_id)
+        if node_type == "technique":
+            return await self._technique_neighborhood(node_id)
+        if node_type == "campaign":
+            return await self._campaign_neighborhood(node_id)
+        return None
+
+    async def _observable_neighborhood(self, observable_id: str) -> dict | None:
+        obs = await self.get_observable(observable_id)
+        if obs is None:
+            return None
+        center = {
+            "node_type": "observable",
+            "id": obs["id"],
+            "label": obs["value"],
+            "sublabel": obs["type"],
+        }
+
+        # Linked observables (outgoing + incoming), joined with peer type/value.
+        out_cursor = await self.db.execute(
+            """SELECT ol.relationship, ol.confidence,
+                      o.id AS peer_id, o.type AS peer_type, o.value AS peer_value
+               FROM observable_links ol
+               JOIN observables o ON o.id = ol.target_id
+               WHERE ol.source_id = ?""",
+            (observable_id,),
+        )
+        in_cursor = await self.db.execute(
+            """SELECT ol.relationship, ol.confidence,
+                      o.id AS peer_id, o.type AS peer_type, o.value AS peer_value
+               FROM observable_links ol
+               JOIN observables o ON o.id = ol.source_id
+               WHERE ol.target_id = ?""",
+            (observable_id,),
+        )
+        camp_cursor = await self.db.execute(
+            """SELECT c.id, c.name, c.status, co.role
+               FROM campaigns c
+               JOIN campaign_observables co ON c.id = co.campaign_id
+               WHERE co.observable_id = ?""",
+            (observable_id,),
+        )
+
+        neighbors: list[dict] = []
+        edges: list[dict] = []
+        seen_neighbors: set[str] = set()
+
+        for r in await out_cursor.fetchall():
+            if r["peer_id"] not in seen_neighbors:
+                neighbors.append({
+                    "node_type": "observable",
+                    "id": r["peer_id"],
+                    "label": r["peer_value"],
+                    "sublabel": r["peer_type"],
+                })
+                seen_neighbors.add(r["peer_id"])
+            edges.append({
+                "source": observable_id,
+                "target": r["peer_id"],
+                "edge_type": r["relationship"],
+                "confidence": r["confidence"],
+            })
+        for r in await in_cursor.fetchall():
+            if r["peer_id"] not in seen_neighbors:
+                neighbors.append({
+                    "node_type": "observable",
+                    "id": r["peer_id"],
+                    "label": r["peer_value"],
+                    "sublabel": r["peer_type"],
+                })
+                seen_neighbors.add(r["peer_id"])
+            edges.append({
+                "source": r["peer_id"],
+                "target": observable_id,
+                "edge_type": r["relationship"],
+                "confidence": r["confidence"],
+            })
+        for r in await camp_cursor.fetchall():
+            if r["id"] not in seen_neighbors:
+                neighbors.append({
+                    "node_type": "campaign",
+                    "id": r["id"],
+                    "label": r["name"],
+                    "sublabel": r["status"],
+                })
+                seen_neighbors.add(r["id"])
+            edges.append({
+                "source": r["id"],
+                "target": observable_id,
+                "edge_type": r["role"] or "indicator",
+                "confidence": 1.0,
+            })
+
+        return {"center": center, "neighbors": neighbors, "edges": edges}
+
+    async def _technique_neighborhood(self, technique_id: str) -> dict | None:
+        cursor = await self.db.execute(
+            "SELECT * FROM techniques WHERE id=?", (technique_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        tech = dict(row)
+        center = {
+            "node_type": "technique",
+            "id": tech["id"],
+            "label": tech["name"],
+            "sublabel": tech["signature_type"],
+        }
+
+        camp_cursor = await self.db.execute(
+            """SELECT c.id, c.name, c.status
+               FROM campaigns c
+               JOIN campaign_techniques ct ON c.id = ct.campaign_id
+               WHERE ct.technique_id = ?""",
+            (technique_id,),
+        )
+        neighbors: list[dict] = []
+        edges: list[dict] = []
+        for r in await camp_cursor.fetchall():
+            neighbors.append({
+                "node_type": "campaign",
+                "id": r["id"],
+                "label": r["name"],
+                "sublabel": r["status"],
+            })
+            edges.append({
+                "source": r["id"],
+                "target": technique_id,
+                "edge_type": "employs",
+                "confidence": 1.0,
+            })
+        return {"center": center, "neighbors": neighbors, "edges": edges}
+
+    async def _campaign_neighborhood(self, campaign_id: str) -> dict | None:
+        campaign = await self.get_campaign(campaign_id)
+        if campaign is None:
+            return None
+        center = {
+            "node_type": "campaign",
+            "id": campaign["id"],
+            "label": campaign["name"],
+            "sublabel": campaign["status"],
+        }
+
+        obs_cursor = await self.db.execute(
+            """SELECT o.id, o.type, o.value, co.role
+               FROM observables o
+               JOIN campaign_observables co ON o.id = co.observable_id
+               WHERE co.campaign_id = ?""",
+            (campaign_id,),
+        )
+        tech_cursor = await self.db.execute(
+            """SELECT t.id, t.name, t.signature_type
+               FROM techniques t
+               JOIN campaign_techniques ct ON t.id = ct.technique_id
+               WHERE ct.campaign_id = ?""",
+            (campaign_id,),
+        )
+        neighbors: list[dict] = []
+        edges: list[dict] = []
+        for r in await obs_cursor.fetchall():
+            neighbors.append({
+                "node_type": "observable",
+                "id": r["id"],
+                "label": r["value"],
+                "sublabel": r["type"],
+            })
+            edges.append({
+                "source": campaign_id,
+                "target": r["id"],
+                "edge_type": r["role"] or "indicator",
+                "confidence": 1.0,
+            })
+        for r in await tech_cursor.fetchall():
+            neighbors.append({
+                "node_type": "technique",
+                "id": r["id"],
+                "label": r["name"],
+                "sublabel": r["signature_type"],
+            })
+            edges.append({
+                "source": campaign_id,
+                "target": r["id"],
+                "edge_type": "employs",
+                "confidence": 1.0,
+            })
+        return {"center": center, "neighbors": neighbors, "edges": edges}

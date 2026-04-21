@@ -327,6 +327,14 @@ def _register_routes(app: FastAPI) -> None:
             },
         )
 
+    # Graph --------------------------------------------------------
+
+    @app.get("/ui/graph", include_in_schema=False, response_class=HTMLResponse)
+    async def graph_page(request: Request):
+        """Shell page for the graph explorer. All data loads client-side from
+        the ``/graph/*`` JSON endpoints in the main API."""
+        return TEMPLATES.TemplateResponse(request, "graph.html", {})
+
     # Observable detail --------------------------------------------
 
     @app.get("/ui/observables/{observable_id}", include_in_schema=False, response_class=HTMLResponse)

@@ -1,0 +1,38 @@
+{% extends "_base.html" %}
+{% block title %}Graph — Detonator{% endblock %}
+
+{% block content %}
+<section class="graph-page">
+  <header class="graph-header">
+    <h2>Graph</h2>
+    <div class="graph-controls">
+      <input
+        type="search"
+        id="node-search"
+        placeholder="Search observables, techniques, campaigns…"
+        autocomplete="off"
+      >
+      <button type="button" id="graph-reset" class="secondary">Reset</button>
+    </div>
+    <div class="graph-legend">
+      <span class="legend-chip legend-observable">Observable</span>
+      <span class="legend-chip legend-technique">Technique</span>
+      <span class="legend-chip legend-campaign">Campaign</span>
+      <span class="muted">· click a node to expand · double-click to open detail</span>
+    </div>
+  </header>
+
+  <div class="graph-layout">
+    <aside class="graph-sidebar">
+      <div id="search-results" class="search-results" hidden></div>
+      <div id="node-detail" class="node-detail">
+        <p class="muted">Search above, then click a result to load its neighborhood.</p>
+      </div>
+    </aside>
+    <div id="cy" class="graph-canvas"></div>
+  </div>
+</section>
+
+<script src="/ui/static/cytoscape.min.js"></script>
+<script src="/ui/static/graph.js"></script>
+{% endblock %}

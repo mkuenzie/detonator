@@ -103,3 +103,96 @@ async def test_technique_match(db: Database):
     await db.upsert_technique("t1", "Google Storage Hosting", "Phishing via GCS", "infrastructure")
     await db.insert_run("r-t", "https://t.com", "direct", {}, "2026-04-09T00:00:00")
     await db.insert_technique_match("t1", "r-t", confidence=0.9, evidence={"url": "storage.googleapis.com/phish"})
+
+
+async def _seed_graph(db: Database) -> None:
+    """Shared fixture data: campaign + 2 observables (linked) + technique."""
+    ts = "2026-04-20T00:00:00"
+    await db.upsert_observable("o1", "domain", "evil.com", ts)
+    await db.upsert_observable("o2", "ip", "1.2.3.4", ts)
+    await db.link_observables("o1", "o2", "resolves_to", ts, confidence=0.9)
+    await db.upsert_technique("t1", "Cloudflare Workers Abuse", "", "infrastructure")
+    await db.insert_campaign("c1", "Phish April", "spring wave", ts)
+    await db.db.execute(
+        "INSERT INTO campaign_observables (campaign_id, observable_id, role) VALUES (?, ?, ?)",
+        ("c1", "o1", "indicator"),
+    )
+    await db.db.execute(
+        "INSERT INTO campaign_techniques (campaign_id, technique_id) VALUES (?, ?)",
+        ("c1", "t1"),
+    )
+    await db.insert_run("r1", "https://evil.com", "direct", {}, ts)
+    await db.link_campaign_run("c1", "r1")
+    await db.db.commit()
+
+
+async def test_get_campaign_detail(db: Database):
+    await _seed_graph(db)
+    detail = await db.get_campaign_detail("c1")
+    assert detail is not None
+    assert detail["name"] == "Phish April"
+    assert len(detail["runs"]) == 1
+    assert len(detail["observables"]) == 1
+    assert detail["observables"][0]["role"] == "indicator"
+    assert len(detail["techniques"]) == 1
+
+
+async def test_get_campaign_detail_missing(db: Database):
+    assert await db.get_campaign_detail("does-not-exist") is None
+
+
+async def test_search_graph_nodes(db: Database):
+    await _seed_graph(db)
+    rows = await db.search_graph_nodes("evil")
+    labels = {(r["node_type"], r["label"]) for r in rows}
+    assert ("observable", "evil.com") in labels
+
+    rows = await db.search_graph_nodes("Cloudflare")
+    assert any(r["node_type"] == "technique" for r in rows)
+
+    rows = await db.search_graph_nodes("Phish")
+    assert any(r["node_type"] == "campaign" for r in rows)
+
+    # Case-insensitive.
+    rows = await db.search_graph_nodes("EVIL")
+    assert any(r["node_type"] == "observable" for r in rows)
+
+
+async def test_get_node_neighborhood_observable(db: Database):
+    await _seed_graph(db)
+    hood = await db.get_node_neighborhood("observable", "o1")
+    assert hood is not None
+    assert hood["center"]["id"] == "o1"
+    neighbor_ids = {n["id"] for n in hood["neighbors"]}
+    assert "o2" in neighbor_ids          # linked observable
+    assert "c1" in neighbor_ids          # campaign containing this observable
+    # Edge types include both the link relationship and the campaign role.
+    edge_types = {e["edge_type"] for e in hood["edges"]}
+    assert "resolves_to" in edge_types
+    assert "indicator" in edge_types
+
+
+async def test_get_node_neighborhood_technique(db: Database):
+    await _seed_graph(db)
+    hood = await db.get_node_neighborhood("technique", "t1")
+    assert hood is not None
+    assert hood["center"]["label"] == "Cloudflare Workers Abuse"
+    assert len(hood["neighbors"]) == 1
+    assert hood["neighbors"][0]["node_type"] == "campaign"
+    assert hood["edges"][0]["edge_type"] == "employs"
+
+
+async def test_get_node_neighborhood_campaign(db: Database):
+    await _seed_graph(db)
+    hood = await db.get_node_neighborhood("campaign", "c1")
+    assert hood is not None
+    types = {n["node_type"] for n in hood["neighbors"]}
+    assert types == {"observable", "technique"}  # runs are excluded per MVP
+    assert len(hood["edges"]) == 2
+
+
+async def test_get_node_neighborhood_missing(db: Database):
+    assert await db.get_node_neighborhood("observable", "nope") is None
+    assert await db.get_node_neighborhood("technique", "nope") is None
+    assert await db.get_node_neighborhood("campaign", "nope") is None
+    assert await db.get_node_neighborhood("run", "nope") is None

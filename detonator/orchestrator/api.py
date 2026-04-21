@@ -188,6 +188,18 @@ def _deps(request: Request) -> AppState:
     return request.app.state.deps
 
 
+def _resolve_cy_id(entity_id: str, center: dict, neighbors: list[dict]) -> str:
+    """Map a raw entity id from a neighborhood's edge list back to the
+    ``{node_type}:{id}`` cytoscape node id. The center + neighbor list cover
+    every id referenced by an edge in a 1-hop neighborhood."""
+    if entity_id == center["id"]:
+        return f"{center['node_type']}:{entity_id}"
+    for n in neighbors:
+        if n["id"] == entity_id:
+            return f"{n['node_type']}:{entity_id}"
+    return f"unknown:{entity_id}"
+
+
 # ── Route registration ──────────────────────────────────────────
 
 
@@ -422,34 +434,10 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/campaigns/{campaign_id}")
     async def get_campaign(campaign_id: UUID, request: Request) -> dict:
         deps = _deps(request)
-        campaign = await deps.database.get_campaign(str(campaign_id))
-        if not campaign:
+        detail = await deps.database.get_campaign_detail(str(campaign_id))
+        if detail is None:
             raise HTTPException(404, f"Campaign {campaign_id} not found")
-
-        runs_cursor = await deps.database.db.execute(
-            """SELECT r.* FROM runs r
-               JOIN campaign_runs cr ON r.id = cr.run_id
-               WHERE cr.campaign_id = ?""",
-            (str(campaign_id),),
-        )
-        obs_cursor = await deps.database.db.execute(
-            """SELECT o.*, co.role FROM observables o
-               JOIN campaign_observables co ON o.id = co.observable_id
-               WHERE co.campaign_id = ?""",
-            (str(campaign_id),),
-        )
-        tech_cursor = await deps.database.db.execute(
-            """SELECT t.* FROM techniques t
-               JOIN campaign_techniques ct ON t.id = ct.technique_id
-               WHERE ct.campaign_id = ?""",
-            (str(campaign_id),),
-        )
-        return {
-            **campaign,
-            "runs": [dict(r) for r in await runs_cursor.fetchall()],
-            "observables": [dict(r) for r in await obs_cursor.fetchall()],
-            "techniques": [dict(r) for r in await tech_cursor.fetchall()],
-        }
+        return detail
 
     @app.put("/campaigns/{campaign_id}")
     async def update_campaign(
@@ -554,6 +542,69 @@ def _register_routes(app: FastAPI) -> None:
                 except Exception:
                     pass
         return rows
+
+    # ── Graph (observable / technique / campaign) ────────────────
+
+    @app.get("/graph/search", summary="Search graph nodes by label")
+    async def graph_search(
+        request: Request,
+        q: str = Query(..., min_length=1, description="Substring match"),
+        limit: int = Query(20, ge=1, le=100),
+    ) -> list[dict]:
+        """Unified search over observables (by value), techniques (by name),
+        and campaigns (by name/description). Returns
+        ``[{node_type, id, label, sublabel}]``."""
+        deps = _deps(request)
+        return await deps.database.search_graph_nodes(q, limit=limit)
+
+    @app.get(
+        "/graph/nodes/{node_type}/{node_id}/neighbors",
+        summary="1-hop neighborhood for a graph node, pre-shaped for cytoscape",
+    )
+    async def graph_neighbors(
+        node_type: str, node_id: str, request: Request
+    ) -> dict:
+        """Return the center node + its 1-hop neighbors + edges in cytoscape's
+        ``{nodes: [{data}], edges: [{data}]}`` element format. Callers merge
+        successive responses into the same graph (cytoscape dedupes by id).
+
+        Node types supported: ``observable``, ``technique``, ``campaign``.
+        Runs are not drawn — see CLAUDE.md graph MVP scope."""
+        if node_type not in ("observable", "technique", "campaign"):
+            raise HTTPException(400, f"Unknown node_type: {node_type}")
+        deps = _deps(request)
+        hood = await deps.database.get_node_neighborhood(node_type, node_id)
+        if hood is None:
+            raise HTTPException(404, f"{node_type} {node_id} not found")
+
+        def _node_el(n: dict) -> dict:
+            return {"data": {
+                "id": f"{n['node_type']}:{n['id']}",
+                "node_type": n["node_type"],
+                "entity_id": n["id"],
+                "label": n["label"],
+                "sublabel": n.get("sublabel") or "",
+            }}
+
+        center = hood["center"]
+        center_key = f"{center['node_type']}:{center['id']}"
+        nodes = [{**_node_el(center), "classes": "center"}]
+        for n in hood["neighbors"]:
+            nodes.append(_node_el(n))
+
+        edges = []
+        for i, e in enumerate(hood["edges"]):
+            # Resolve source/target entity ids to cytoscape ids. The neighborhood
+            # shape gives us the raw entity ids; we need to look up node_type.
+            edges.append({"data": {
+                "id": f"e{i}:{e['source']}->{e['target']}",
+                "source": _resolve_cy_id(e["source"], center, hood["neighbors"]),
+                "target": _resolve_cy_id(e["target"], center, hood["neighbors"]),
+                "label": e["edge_type"],
+                "edge_type": e["edge_type"],
+                "confidence": e.get("confidence", 1.0),
+            }})
+        return {"nodes": nodes, "edges": edges, "center_id": center_key}
 
 
 # ── Entrypoint ───────────────────────────────────────────────────

@@ -204,6 +204,97 @@ details.json pre {
   border-radius: 4px;
 }
 
+/* Graph page */
+.graph-page { width: 100%; }
+.graph-header { margin-bottom: 0.75rem; }
+.graph-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.graph-controls input[type="search"] {
+  flex: 1;
+  margin: 0;
+  max-width: 480px;
+}
+.graph-controls button { margin: 0; width: auto; }
+.graph-legend {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+}
+.legend-chip {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: #fff;
+  font-weight: 500;
+}
+.legend-observable { background: #3b82f6; }
+.legend-technique  { background: #f59e0b; }
+.legend-campaign   { background: #10b981; }
+
+.graph-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1rem;
+  height: 72vh;
+  min-height: 500px;
+}
+.graph-sidebar {
+  overflow-y: auto;
+  border: 1px solid var(--pico-muted-border-color, #ccc);
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: var(--pico-card-background-color, #fff);
+}
+.graph-canvas {
+  border: 1px solid var(--pico-muted-border-color, #ccc);
+  border-radius: 6px;
+  background: #fafafa;
+}
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+.search-result {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  width: 100%;
+}
+.search-result:hover {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+.search-result .result-label {
+  font-family: var(--pico-font-family-monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.node-detail h4 { margin: 0.25rem 0 0.5rem; }
+.node-detail p { margin: 0.35rem 0; font-size: 0.9rem; }
+.detail-list {
+  margin: 0.35rem 0 0 1rem;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
 @media (prefers-color-scheme: dark) {
   .status-badge.pending,
   .status-badge.provisioning,
@@ -236,5 +327,10 @@ details.json pre {
   .run-error {
     background: #2d0d0d;
     color: #e57373;
+  }
+  .graph-canvas { background: #1a1a1a; }
+  .search-result:hover {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
   }
 }
