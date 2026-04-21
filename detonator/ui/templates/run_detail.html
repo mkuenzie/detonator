@@ -116,7 +116,7 @@
         {% for a in site_resources %}
           <tr>
             <td>{{ a.type }}</td>
-            <td class="mono">
+            <td class="mono" style="word-break:break-all;max-width:420px">
               {% if a.source_url %}
                 {{ a.source_url }}
               {% else %}

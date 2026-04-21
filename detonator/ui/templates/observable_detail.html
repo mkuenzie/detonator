@@ -20,23 +20,25 @@
     <div class="flex-row" style="margin-top:0.4rem">
       <div><span class="muted">ID:</span> <span class="mono muted" style="font-size:0.85em">{{ obs.id }}</span></div>
     </div>
-    {% if obs.metadata %}
-    <div style="margin-top:0.75rem">
-      <span class="muted">Metadata:</span>
-      <table style="margin-top:0.35rem">
-        <tbody>
-          {% for k, v in obs.metadata.items() %}
-          <tr>
-            <td class="mono muted" style="white-space:nowrap;padding-right:1.5rem">{{ k }}</td>
-            <td class="mono">{{ v }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% endif %}
   </article>
 </section>
+
+{% if obs.metadata %}
+<section>
+  <h3>Metadata <span class="muted">({{ obs.metadata|length }})</span></h3>
+  <table>
+    <thead><tr><th>Key</th><th>Value</th></tr></thead>
+    <tbody>
+      {% for k, v in obs.metadata.items() %}
+      <tr>
+        <td class="mono muted" style="white-space:nowrap">{{ k }}</td>
+        <td class="mono" style="word-break:break-all">{{ v }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
 
 {% if obs.runs %}
 <section>
