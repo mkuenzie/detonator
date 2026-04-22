@@ -29,7 +29,7 @@ from detonator.models.observables import (
 logger = logging.getLogger(__name__)
 
 _RECORD_TYPES = ("A", "AAAA", "CNAME", "MX", "NS", "TXT")
-
+_BAD_RECORDS = ("0.0.0.0", "::")
 
 class DnsEnricher(Enricher):
     """DNS enricher backed by dnspython's async resolver."""
@@ -95,7 +95,7 @@ class DnsEnricher(Enricher):
         for rtype in ("A", "AAAA"):
             for ip_str in records.get(rtype, []):
                 ip_clean = ip_str.strip()
-                if not ip_clean:
+                if not ip_clean or ip_clean in _BAD_RECORDS:
                     continue
                 ip_obs_id = observable_id(ObservableType.IP, ip_clean)
                 observables.append(
