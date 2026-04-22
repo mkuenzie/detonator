@@ -135,6 +135,13 @@ class TlsEnricher(Enricher):
                 "not_after": cert.not_valid_after_utc.isoformat(),
             },
         )
+        domain_obs = Observable(
+            id=domain_obs_id,
+            type=ObservableType.DOMAIN,
+            value=domain,
+            first_seen=now,
+            last_seen=now,
+        )
         link = ObservableLink(
             source_id=domain_obs_id,
             target_id=fp_obs_id,
@@ -148,7 +155,7 @@ class TlsEnricher(Enricher):
             enricher=self.name,
             input_value=domain,
             data=data,
-            observables=[fp_obs],
+            observables=[domain_obs, fp_obs],
             observable_links=[link],
         )
 

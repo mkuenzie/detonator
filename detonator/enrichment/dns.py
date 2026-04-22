@@ -82,6 +82,15 @@ class DnsEnricher(Enricher):
         observable_links: list[ObservableLink] = []
 
         domain_obs_id = observable_id(ObservableType.DOMAIN, domain)
+        observables.append(
+            Observable(
+                id=domain_obs_id,
+                type=ObservableType.DOMAIN,
+                value=domain,
+                first_seen=now,
+                last_seen=now,
+            )
+        )
 
         for rtype in ("A", "AAAA"):
             for ip_str in records.get(rtype, []):

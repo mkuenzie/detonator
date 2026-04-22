@@ -129,6 +129,13 @@ class FaviconEnricher(Enricher):
             last_seen=now,
             metadata={"md5": md5, "origin": origin},
         )
+        domain_obs = Observable(
+            id=domain_obs_id,
+            type=ObservableType.DOMAIN,
+            value=domain,
+            first_seen=now,
+            last_seen=now,
+        )
         link = ObservableLink(
             source_id=domain_obs_id,
             target_id=favicon_obs_id,
@@ -147,7 +154,7 @@ class FaviconEnricher(Enricher):
                 "mmh3_hash": shodan_hash,
                 "md5": md5,
             },
-            observables=[favicon_obs],
+            observables=[domain_obs, favicon_obs],
             observable_links=[link],
         )
 
