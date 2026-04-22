@@ -143,7 +143,7 @@ class EnrichmentPipeline:
         """Return the list of artifact types present in the run directory."""
         types: list[str] = []
         if (artifact_dir / "har_full.har").exists():
-            types.extend(["har", "domain", "url"])
+            types.extend(["har", "domain", "ip", "url"])
         if (artifact_dir / "dom.html").exists():
             types.append("dom")
         if (artifact_dir / "navigations.json").exists():
@@ -210,6 +210,8 @@ class EnrichmentPipeline:
             await self._db.upsert_observable(
                 str(obs.id), obs.type.value, obs.value, now
             )
+            if obs.metadata:
+                await self._db.upsert_observable_metadata(str(obs.id), obs.metadata)
             await self._db.link_run_observable(
                 run_id,
                 str(obs.id),
@@ -313,6 +315,9 @@ def _build_enricher(name: str, cfg: EnrichmentConfig) -> Enricher | None:
     if name == "navigations":
         from detonator.enrichment.navigations import NavigationEnricher
         return NavigationEnricher()
+    if name == "hosting":
+        from detonator.enrichment.hosting import HostingEnricher
+        return HostingEnricher()
     return None
 
 

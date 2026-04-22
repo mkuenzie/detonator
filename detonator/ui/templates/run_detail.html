@@ -85,8 +85,10 @@
     <a href="/runs/{{ run.id }}/artifacts.zip" role="button" class="secondary" style="font-size:0.85rem;padding:0.25rem 0.75rem">Download zip</a>
   </h3>
   {% if artifacts %}
-    {% set primary_artifacts = artifacts | selectattr('type', '!=', 'site_resource') | list %}
+    {% set network_types = ['site_resource', 'request_body'] %}
+    {% set primary_artifacts = artifacts | rejectattr('type', 'in', network_types) | list %}
     {% set site_resources = artifacts | selectattr('type', '==', 'site_resource') | list %}
+    {% set request_bodies = artifacts | selectattr('type', '==', 'request_body') | list %}
     {% if primary_artifacts %}
       <h4 class="muted" style="margin:0.5rem 0 0.25rem">Capture artifacts</h4>
       <table>
@@ -116,6 +118,29 @@
         <thead><tr><th>Type</th><th>URL</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
         <tbody>
         {% for a in site_resources %}
+          <tr>
+            <td>{{ a.type }}</td>
+            <td class="mono" style="word-break:break-all;max-width:420px">
+              {% if a.source_url %}
+                {{ a.source_url }}
+              {% else %}
+                {{ a.path.split('/')[-1] if '/' in a.path else a.path }}
+              {% endif %}
+            </td>
+            <td class="muted">{{ a.size|bytes }}</td>
+            <td class="mono muted" title="{{ a.content_hash }}">{{ (a.content_hash or '')[:12] }}{% if a.content_hash %}…{% endif %}</td>
+            <td><a href="/runs/{{ run.id }}/artifacts/{{ a.path.split('/')[-1] if '/' in a.path else a.path }}">download</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    {% if request_bodies %}
+      <h4 class="muted" style="margin:1rem 0 0.25rem">Request bodies <span>({{ request_bodies|length }})</span></h4>
+      <table>
+        <thead><tr><th>Type</th><th>URL</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
+        <tbody>
+        {% for a in request_bodies %}
           <tr>
             <td>{{ a.type }}</td>
             <td class="mono" style="word-break:break-all;max-width:420px">

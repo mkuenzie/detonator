@@ -23,13 +23,15 @@ from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
+from urllib.parse import urlparse
+
 from detonator.enrichment.base import (
     Enricher,
     EnrichmentResult,
     RunContext,
     observable_id,
 )
-from detonator.models.observables import Observable, ObservableType
+from detonator.models.observables import Observable, ObservableLink, ObservableType, RelationshipType
 
 logger = logging.getLogger(__name__)
 
@@ -86,19 +88,26 @@ class DomExtractor(Enricher):
                 )
             ]
 
-        return [self._extract(html, str(dom_path))]
+        return [self._extract(html, str(dom_path), seed_url=context.seed_url)]
 
-    def _extract(self, html: str, source: str) -> EnrichmentResult:
+    def _extract(self, html: str, source: str, seed_url: str = "") -> EnrichmentResult:
         now = datetime.now(UTC)
         observables: list[Observable] = []
+        links: list[ObservableLink] = []
         counts: dict[str, int] = {}
+
+        seed_domain = urlparse(seed_url).hostname or "" if seed_url else ""
+        seed_obs_id = observable_id(ObservableType.DOMAIN, seed_domain) if seed_domain else None
+
+        _found_on_types = {ObservableType.PHONE, ObservableType.EMAIL, ObservableType.CRYPTO_WALLET}
 
         def _add(obs_type: ObservableType, value: str) -> None:
             value = value.strip()
             if not value:
                 return
+            obs_id = observable_id(obs_type, value)
             obs = Observable(
-                id=observable_id(obs_type, value),
+                id=obs_id,
                 type=obs_type,
                 value=value,
                 first_seen=now,
@@ -106,6 +115,17 @@ class DomExtractor(Enricher):
             )
             observables.append(obs)
             counts[obs_type] = counts.get(obs_type, 0) + 1
+            if seed_obs_id is not None and obs_type in _found_on_types:
+                links.append(
+                    ObservableLink(
+                        source_id=obs_id,
+                        target_id=seed_obs_id,
+                        relationship=RelationshipType.FOUND_ON,
+                        first_seen=now,
+                        last_seen=now,
+                        evidence={"artifact": "dom.html"},
+                    )
+                )
 
         # Emails
         for m in _RE_EMAIL.finditer(html):
@@ -136,6 +156,17 @@ class DomExtractor(Enricher):
         for url in parser.meta_refresh_urls:
             _add(ObservableType.URL, url)
 
+        # Ensure seed domain observable is present so found_on link targets resolve.
+        if seed_domain and seed_obs_id is not None:
+            seed_obs = Observable(
+                id=seed_obs_id,
+                type=ObservableType.DOMAIN,
+                value=seed_domain,
+                first_seen=now,
+                last_seen=now,
+            )
+            observables.insert(0, seed_obs)
+
         # Deduplicate preserving order (earlier = higher priority)
         seen_ids: set[str] = set()
         unique_obs: list[Observable] = []
@@ -144,6 +175,15 @@ class DomExtractor(Enricher):
             if key not in seen_ids:
                 seen_ids.add(key)
                 unique_obs.append(obs)
+
+        # Deduplicate links by (source, target, relationship)
+        seen_links: set[str] = set()
+        unique_links: list[ObservableLink] = []
+        for lnk in links:
+            key = f"{lnk.source_id}:{lnk.target_id}:{lnk.relationship}"
+            if key not in seen_links:
+                seen_links.add(key)
+                unique_links.append(lnk)
 
         data = {
             "counts": {str(k): v for k, v in counts.items()},
@@ -156,6 +196,7 @@ class DomExtractor(Enricher):
             input_value=source,
             data=data,
             observables=unique_obs,
+            observable_links=unique_links,
         )
 
 

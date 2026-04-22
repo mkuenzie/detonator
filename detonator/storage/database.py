@@ -335,6 +335,20 @@ class Database:
         )
         await self.db.commit()
 
+    async def upsert_observable_metadata(
+        self, observable_id: str, metadata: dict
+    ) -> None:
+        """Write key/value pairs into observable_metadata (INSERT OR REPLACE per key)."""
+        for key, raw_value in metadata.items():
+            value = str(raw_value) if not isinstance(raw_value, str) else raw_value
+            await self.db.execute(
+                """INSERT OR REPLACE INTO observable_metadata (observable_id, key, value)
+                   VALUES (?, ?, ?)""",
+                (observable_id, key, value),
+            )
+        if metadata:
+            await self.db.commit()
+
     async def link_run_observable(
         self, run_id: str, observable_id: str, source: str, context: dict | None = None
     ) -> None:

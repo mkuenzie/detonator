@@ -196,3 +196,44 @@ async def test_get_node_neighborhood_missing(db: Database):
     assert await db.get_node_neighborhood("technique", "nope") is None
     assert await db.get_node_neighborhood("campaign", "nope") is None
     assert await db.get_node_neighborhood("run", "nope") is None
+
+
+async def test_upsert_observable_metadata_round_trip(db: Database):
+    """Metadata written via upsert_observable_metadata surfaces in get_observable_detail."""
+    ts = "2026-04-22T00:00:00"
+    await db.upsert_observable("om-1", "certificate", "example.com (fp:abc123def456)", ts)
+    await db.upsert_observable_metadata("om-1", {
+        "fingerprint_sha256": "abc123",
+        "subject_cn": "example.com",
+        "not_after": "2027-01-01T00:00:00",
+    })
+
+    detail = await db.get_observable_detail("om-1")
+    assert detail is not None
+    assert detail["metadata"]["fingerprint_sha256"] == "abc123"
+    assert detail["metadata"]["subject_cn"] == "example.com"
+    assert detail["metadata"]["not_after"] == "2027-01-01T00:00:00"
+
+
+async def test_upsert_observable_metadata_merge_semantics(db: Database):
+    """Later calls replace per-key but don't remove keys set by earlier calls."""
+    ts = "2026-04-22T00:00:00"
+    await db.upsert_observable("om-2", "domain", "test.com", ts)
+    await db.upsert_observable_metadata("om-2", {"key_a": "first", "key_b": "stays"})
+    await db.upsert_observable_metadata("om-2", {"key_a": "second"})
+
+    detail = await db.get_observable_detail("om-2")
+    meta = detail["metadata"]
+    assert meta["key_a"] == "second"
+    assert meta["key_b"] == "stays"
+
+
+async def test_upsert_observable_metadata_non_string_coerced(db: Database):
+    """Non-string values are coerced to str."""
+    ts = "2026-04-22T00:00:00"
+    await db.upsert_observable("om-3", "ip", "1.2.3.4", ts)
+    await db.upsert_observable_metadata("om-3", {"count": 42, "flag": True})
+
+    detail = await db.get_observable_detail("om-3")
+    assert detail["metadata"]["count"] == "42"
+    assert detail["metadata"]["flag"] == "True"

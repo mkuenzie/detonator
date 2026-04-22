@@ -27,13 +27,13 @@ from uuid import UUID, uuid4
 
 from detonator.analysis.chain import extract_chain
 from detonator.analysis.filter import NoiseFilter
-from detonator.analysis.har_body_map import map_body_files_to_urls
+from detonator.analysis.har_body_map import HarBodyRef, map_body_files
 from detonator.analysis.modules.base import AnalysisContext
 from detonator.analysis.modules.pipeline import AnalysisPipeline
 from detonator.config import AgentInstanceConfig, DetonatorConfig
 from detonator.enrichment.pipeline import EnrichmentPipeline
 from detonator.logging import RunAdapter
-from detonator.models import RunConfig, RunRecord, RunState, StateTransition
+from detonator.models import ArtifactType, RunConfig, RunRecord, RunState, StateTransition
 from detonator.orchestrator.agent_manager import AgentManager
 from detonator.providers.egress.base import EgressProvider
 from detonator.providers.vm.base import VMProvider
@@ -138,7 +138,11 @@ class Runner:
             str(self.record.id), "meta.json", meta_bytes
         )
         await self.database.insert_artifact(
-            str(self.record.id), "meta", str(path), size=size, content_hash=content_hash
+            str(self.record.id),
+            ArtifactType.META,
+            str(path),
+            size=size,
+            content_hash=content_hash,
         )
 
     async def _write_manifest(self) -> None:
@@ -166,7 +170,7 @@ class Runner:
             )
             await self.database.insert_artifact(
                 str(self.record.id),
-                "manifest",
+                ArtifactType.MANIFEST,
                 str(path),
                 size=size,
                 content_hash=content_hash,
@@ -348,17 +352,17 @@ class Runner:
 
         # Parse the HAR once so the insert loop can classify + stamp body files
         # with their originating URL in a single pass.
-        body_map: dict[str, str] = {}
+        body_map: dict[str, HarBodyRef] = {}
         har_path = run_dir / "har_full.har"
         if har_path.exists():
             try:
-                body_map = map_body_files_to_urls(har_path)
+                body_map = map_body_files(har_path)
             except Exception as exc:
                 self._log.warning("har_body_map failed: %s", exc)
 
         for name, path, size in downloaded:
-            source_url = body_map.get(Path(name).name)
-            artifact_type = self._infer_artifact_type(name, source_url=source_url)
+            ref = body_map.get(Path(name).name)
+            artifact_type = self._infer_artifact_type(name, body_ref=ref)
             symlink_path, size, content_hash = self.artifact_store.adopt(
                 str(self.record.id), name, path
             )
@@ -368,33 +372,41 @@ class Runner:
                 str(symlink_path),
                 size=size,
                 content_hash=content_hash,
-                source_url=source_url,
+                source_url=(ref.url if ref else None),
             )
 
     @staticmethod
-    def _infer_artifact_type(name: str, *, source_url: str | None = None) -> str:
-        """Map an artifact filename to one of our ``ArtifactType`` values.
+    def _infer_artifact_type(
+        name: str, *, body_ref: HarBodyRef | None = None
+    ) -> ArtifactType:
+        """Map an artifact filename to an ``ArtifactType``.
 
-        When ``source_url`` is set, the file is a Playwright HAR body attachment
-        (a fetched response body) — classify it as ``site_resource`` regardless
-        of its content-addressed filename.
+        When ``body_ref`` is set, the file is a Playwright HAR body attachment
+        and the HAR direction drives classification:
+
+        - ``response`` → ``SITE_RESOURCE`` (a resource the site loaded)
+        - ``request``  → ``REQUEST_BODY``  (an outgoing POST/PUT payload —
+          telemetry beacons, form submissions, fingerprint uploads)
+
+        With no body_ref, fall back to filename heuristics for the files the
+        agent writes directly (HAR, DOM, console, screenshots, meta, …).
         """
-        if source_url:
-            return "site_resource"
+        if body_ref is not None:
+            if body_ref.direction == "request":
+                return ArtifactType.REQUEST_BODY
+            return ArtifactType.SITE_RESOURCE
         lower = name.lower()
         if lower.startswith("screenshots/") or lower.endswith((".png", ".jpg", ".jpeg")):
-            return "screenshot"
+            return ArtifactType.SCREENSHOT
         if lower.endswith("navigations.json"):
-            return "navigations"
+            return ArtifactType.NAVIGATIONS
         if "har" in lower and lower.endswith((".har", ".json")):
-            return "har_full"
+            return ArtifactType.HAR_FULL
         if lower.endswith("dom.html") or lower.endswith(".html"):
-            return "dom"
+            return ArtifactType.DOM
         if "console" in lower:
-            return "console"
-        if "meta" in lower:
-            return "meta"
-        return "meta"  # fallback bucket
+            return ArtifactType.CONSOLE
+        return ArtifactType.META
 
     async def _enrich(self) -> None:
         """Run the enrichment pipeline against collected artifacts."""
@@ -461,7 +473,7 @@ class Runner:
         )
         await self.database.insert_artifact(
             str(self.record.id),
-            "har_chain",
+            ArtifactType.HAR_CHAIN,
             str(chain_path),
             size=chain_size,
             content_hash=chain_hash,
@@ -474,7 +486,7 @@ class Runner:
         )
         await self.database.insert_artifact(
             str(self.record.id),
-            "filter_result",
+            ArtifactType.FILTER_RESULT,
             str(fr_path),
             size=fr_size,
             content_hash=fr_hash,

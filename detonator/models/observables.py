@@ -16,10 +16,13 @@ class ObservableType(StrEnum):
     FAVICON_HASH = "favicon_hash"
     EMAIL = "email"
     PHONE = "phone"
-    TLS_FINGERPRINT = "tls_fingerprint"
+    TLS_FINGERPRINT = "tls_fingerprint"  # deprecated — superseded by CERTIFICATE
     CRYPTO_WALLET = "crypto_wallet"
     REGISTRANT = "registrant"
     ASN = "asn"
+    CERTIFICATE = "certificate"
+    CERTIFICATE_AUTHORITY = "certificate_authority"
+    HOSTING_PROVIDER = "hosting_provider"
 
 
 class ObservableSource(StrEnum):
@@ -36,6 +39,9 @@ class RelationshipType(StrEnum):
     CO_OCCURS_WITH = "co_occurs_with"
     HOSTS = "hosts"
     ISSUED_BY = "issued_by"
+    PRESENTS_CERTIFICATE = "presents_certificate"
+    HOSTED_BY = "hosted_by"
+    FOUND_ON = "found_on"
 
 
 class SignatureType(StrEnum):

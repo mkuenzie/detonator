@@ -23,13 +23,56 @@
   </article>
 </section>
 
+{% if obs.type in ('certificate', 'tls_fingerprint') and obs.metadata %}
+<section>
+  <article class="card" style="background:var(--pico-card-background-color,#f9f9f9)">
+    <div class="flex-row">
+      {% if obs.metadata.subject_cn %}<div><span class="muted">Subject CN:</span> <strong>{{ obs.metadata.subject_cn }}</strong></div>{% endif %}
+      {% if obs.metadata.issuer_cn %}<div><span class="muted">Issuer:</span> {{ obs.metadata.issuer_cn }}{% if obs.metadata.issuer_org %} ({{ obs.metadata.issuer_org }}){% endif %}</div>{% endif %}
+      {% if obs.metadata.not_after %}<div><span class="muted">Expires:</span> {{ obs.metadata.not_after[:10] }}</div>{% endif %}
+    </div>
+  </article>
+</section>
+{% elif obs.type == 'certificate_authority' and obs.metadata %}
+<section>
+  <article class="card" style="background:var(--pico-card-background-color,#f9f9f9)">
+    <div class="flex-row">
+      {% if obs.metadata.subject_cn %}<div><span class="muted">Subject CN:</span> <strong>{{ obs.metadata.subject_cn }}</strong></div>{% endif %}
+      {% if obs.metadata.subject_org %}<div><span class="muted">Organisation:</span> {{ obs.metadata.subject_org }}</div>{% endif %}
+      {% if obs.metadata.is_self_signed %}<div><span class="muted">Self-signed:</span> {{ obs.metadata.is_self_signed }}</div>{% endif %}
+    </div>
+  </article>
+</section>
+{% elif obs.type == 'hosting_provider' and obs.metadata %}
+<section>
+  <article class="card" style="background:var(--pico-card-background-color,#f9f9f9)">
+    <div class="flex-row">
+      {% if obs.metadata.asn %}<div><span class="muted">ASN:</span> <strong>{{ obs.metadata.asn }}</strong></div>{% endif %}
+      {% if obs.metadata.as_name %}<div><span class="muted">Name:</span> {{ obs.metadata.as_name }}</div>{% endif %}
+      {% if obs.metadata.country %}<div><span class="muted">Country:</span> {{ obs.metadata.country }}</div>{% endif %}
+      {% if obs.metadata.bgp_prefix %}<div><span class="muted">BGP prefix:</span> <code>{{ obs.metadata.bgp_prefix }}</code></div>{% endif %}
+    </div>
+  </article>
+</section>
+{% elif obs.type == 'domain' and obs.metadata %}
+<section>
+  <article class="card" style="background:var(--pico-card-background-color,#f9f9f9)">
+    <div class="flex-row">
+      {% if obs.metadata.registrar %}<div><span class="muted">Registrar:</span> {{ obs.metadata.registrar }}</div>{% endif %}
+      {% if obs.metadata.creation_date %}<div><span class="muted">Registered:</span> {{ obs.metadata.creation_date[:10] }}</div>{% endif %}
+      {% if obs.metadata.expiration_date %}<div><span class="muted">Expires:</span> {{ obs.metadata.expiration_date[:10] }}</div>{% endif %}
+    </div>
+  </article>
+</section>
+{% endif %}
+
 {% if obs.metadata %}
 <section>
   <h3>Metadata <span class="muted">({{ obs.metadata|length }})</span></h3>
   <table>
     <thead><tr><th>Key</th><th>Value</th></tr></thead>
     <tbody>
-      {% for k, v in obs.metadata.items() %}
+      {% for k, v in obs.metadata.items()|sort %}
       <tr>
         <td class="mono muted" style="white-space:nowrap">{{ k }}</td>
         <td class="mono" style="word-break:break-all">{{ v }}</td>

@@ -109,6 +109,19 @@ class PlaywrightChromiumModule(BrowserModule):
             user_data_dir, **context_kwargs
         )
 
+        # Force Playwright to materialize response bodies into the HAR
+        # attachments. Without this, main-frame document navigations (including
+        # the seed URL and redirect chain) stream directly to the renderer and
+        # their bodies never get written as _file entries — so they'd be absent
+        # from site_resource artifacts downstream.
+        async def _force_body(response: Any) -> None:
+            try:
+                await response.body()
+            except Exception:
+                pass
+
+        self._context.on("response", lambda r: asyncio.create_task(_force_body(r)))
+
         if stealth.enabled:
             # Inject locale so stealth.js can use it without hardcoding
             await self._context.add_init_script(
