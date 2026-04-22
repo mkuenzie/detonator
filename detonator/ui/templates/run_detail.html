@@ -18,6 +18,7 @@
     <button class="btn-delete-run"
             hx-delete="/runs/{{ run.id }}"
             hx-confirm="Delete run {{ run.id[:8] }}? This cannot be undone."
+            hx-swap="none"
             hx-on::after-request="if(event.detail.successful) window.location='/ui/runs'">Delete run</button>
   </div>
   {% endif %}

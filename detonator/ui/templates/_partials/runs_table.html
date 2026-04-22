@@ -25,7 +25,7 @@
                 hx-delete="/runs/{{ r.id }}"
                 hx-confirm="Delete run {{ r.id[:8] }}? This cannot be undone."
                 hx-target="closest tr"
-                hx-swap="outerHTML swap:0.2s">✕</button>
+                hx-swap="delete">✕</button>
         {% endif %}
       </td>
     </tr>
