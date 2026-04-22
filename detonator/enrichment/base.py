@@ -57,7 +57,7 @@ class Enricher(ABC):
         }
 
     def _is_host_excluded(self, host: str) -> bool:
-        host = host.lower().strip().removeprefix("www.")
+        host = host.lower().strip().removeprefix("www")
         if host in self._exclude_hosts:
             return True
         return any(host.endswith(f".{d}") for d in self._exclude_hosts)
