@@ -152,15 +152,19 @@ async def resume() -> StatusResponse:
 async def list_artifacts() -> dict:
     if runtime.artifact_dir is None or not runtime.artifact_dir.exists():
         return {"artifacts": []}
-    files = [f.name for f in runtime.artifact_dir.iterdir() if f.is_file()]
+    files = [
+        str(f.relative_to(runtime.artifact_dir))
+        for f in runtime.artifact_dir.rglob("*")
+        if f.is_file()
+    ]
     return {"artifacts": files}
 
 
-@app.get("/artifacts/{artifact_name}")
+@app.get("/artifacts/{artifact_name:path}")
 async def get_artifact(artifact_name: str) -> FileResponse:
     if runtime.artifact_dir is None:
         raise HTTPException(404, "No artifacts available")
-    path = runtime.artifact_dir / artifact_name
-    if not path.exists() or not path.is_relative_to(runtime.artifact_dir):
+    path = (runtime.artifact_dir / artifact_name).resolve()
+    if not path.is_relative_to(runtime.artifact_dir.resolve()) or not path.exists():
         raise HTTPException(404, f"Artifact not found: {artifact_name}")
     return FileResponse(path)

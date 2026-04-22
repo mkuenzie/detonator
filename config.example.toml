@@ -196,6 +196,8 @@ exclude_hosts = [
   "cdnjs.cloudflare.com",
   "googleapis.com",
   "gstatic.com",
+  "google.com",
+  "facebook.com"
 ]
 
 # CDN origins don't serve a meaningful /favicon.ico.
