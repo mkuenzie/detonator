@@ -2,17 +2,18 @@
 {% block title %}Run {{ run.id[:8] }} · Detonator{% endblock %}
 
 {% block content %}
+<div id="run-main"
+  {% if not is_terminal %}
+    hx-get="/ui/runs/{{ run.id }}"
+    hx-trigger="every 2s"
+    hx-select="#run-main"
+    hx-swap="outerHTML"
+  {% endif %}>
 <header style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
   <h2 style="margin:0">Run <span class="mono">{{ run.id[:8] }}</span></h2>
   <div id="run-state">
     {% include "_partials/run_state.html" %}
   </div>
-  {% if not is_terminal %}
-  <div hx-get="/ui/_partials/run-state/{{ run.id }}"
-       hx-trigger="every 2s"
-       hx-target="#run-state"
-       hx-swap="innerHTML"></div>
-  {% endif %}
   {% if is_terminal %}
   <div style="margin-left:auto">
     <button class="btn-delete-run"
@@ -215,4 +216,5 @@
   </article>
 </section>
 {% endif %}
+</div>
 {% endblock %}
