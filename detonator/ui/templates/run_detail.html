@@ -106,7 +106,7 @@
             </td>
             <td class="muted">{{ a.size|bytes }}</td>
             <td class="mono muted" title="{{ a.content_hash }}">{{ (a.content_hash or '')[:12] }}{% if a.content_hash %}…{% endif %}</td>
-            <td><a href="/runs/{{ run.id }}/artifacts/{{ a.path.split('/')[-1] if '/' in a.path else a.path }}">download</a></td>
+            <td><a href="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}">download</a></td>
           </tr>
         {% endfor %}
         </tbody>
@@ -129,7 +129,7 @@
             </td>
             <td class="muted">{{ a.size|bytes }}</td>
             <td class="mono muted" title="{{ a.content_hash }}">{{ (a.content_hash or '')[:12] }}{% if a.content_hash %}…{% endif %}</td>
-            <td><a href="/runs/{{ run.id }}/artifacts/{{ a.path.split('/')[-1] if '/' in a.path else a.path }}">download</a></td>
+            <td><a href="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}">download</a></td>
           </tr>
         {% endfor %}
         </tbody>
@@ -152,7 +152,7 @@
             </td>
             <td class="muted">{{ a.size|bytes }}</td>
             <td class="mono muted" title="{{ a.content_hash }}">{{ (a.content_hash or '')[:12] }}{% if a.content_hash %}…{% endif %}</td>
-            <td><a href="/runs/{{ run.id }}/artifacts/{{ a.path.split('/')[-1] if '/' in a.path else a.path }}">download</a></td>
+            <td><a href="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}">download</a></td>
           </tr>
         {% endfor %}
         </tbody>

@@ -365,6 +365,12 @@ def _register_routes(app: FastAPI) -> None:
         if not row:
             raise HTTPException(404, f"Run {run_id} not found")
         artifacts = await deps.database.get_artifacts(str(run_id))
+        run_dir = deps.artifact_store.run_dir(str(run_id))
+        for a in artifacts:
+            try:
+                a["rel_path"] = str(Path(a["path"]).relative_to(run_dir))
+            except (ValueError, TypeError):
+                a["rel_path"] = Path(a["path"]).name if a.get("path") else ""
 
         run_cfg = {}
         try:
