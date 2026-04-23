@@ -148,14 +148,18 @@ async def resume() -> StatusResponse:
     return StatusResponse(state=runtime.state)
 
 
+_ARTIFACT_SKIP_DIRS = frozenset({"user-data"})
+
+
 @app.get("/artifacts")
 async def list_artifacts() -> dict:
     if runtime.artifact_dir is None or not runtime.artifact_dir.exists():
         return {"artifacts": []}
     files = [
-        str(f.relative_to(runtime.artifact_dir))
+        f.relative_to(runtime.artifact_dir).as_posix()
         for f in runtime.artifact_dir.rglob("*")
         if f.is_file()
+        and not _ARTIFACT_SKIP_DIRS.intersection(f.relative_to(runtime.artifact_dir).parts)
     ]
     return {"artifacts": files}
 
