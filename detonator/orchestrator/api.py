@@ -620,11 +620,11 @@ def _register_routes(app: FastAPI) -> None:
             nodes.append(_node_el(n))
 
         edges = []
-        for i, e in enumerate(hood["edges"]):
+        for e in hood["edges"]:
             # Resolve source/target entity ids to cytoscape ids. The neighborhood
             # shape gives us the raw entity ids; we need to look up node_type.
             edges.append({"data": {
-                "id": f"e{i}:{e['source']}->{e['target']}",
+                "id": f"e:{e['source']}:{e['edge_type']}:{e['target']}",
                 "source": _resolve_cy_id(e["source"], center, hood["neighbors"]),
                 "target": _resolve_cy_id(e["target"], center, hood["neighbors"]),
                 "label": e["edge_type"],
