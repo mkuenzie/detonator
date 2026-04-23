@@ -12,6 +12,7 @@ from typing import Any
 
 from agent.browser._driver import _DRIVER, async_playwright
 from agent.browser.base import BrowserModule, DetonationRequest, DetonationResult, StealthProfile
+from agent.browser.cdp_fetch_interceptor import CDPFetchInterceptor
 from agent.browser.cdp_response_tap import CDPResponseTap
 from agent.browser.network_capture import NetworkCapture
 
@@ -112,7 +113,8 @@ class PlaywrightChromiumModule(BrowserModule):
         capture = NetworkCapture(self._artifact_dir / "bodies")
         capture.attach(self._context)
         tap = CDPResponseTap(sink=capture)
-
+        fetch_intercept = CDPFetchInterceptor(sink=capture)
+        
         if stealth.enabled:
             await self._context.add_init_script(
                 script=f"window.__stealthLocale__ = {json.dumps(stealth.locale)};"
@@ -124,6 +126,7 @@ class PlaywrightChromiumModule(BrowserModule):
         # page. attach_to_context awaits Network.enable for every page in the list,
         # guaranteeing it completes before goto() is called below.
         await tap.attach_to_context(self._context)
+        await fetch_intercept.attach_to_context(self._context)
         self._page.on("console", self._on_console)
         self._page.on("pageerror", self._on_page_error)
 
@@ -197,7 +200,8 @@ class PlaywrightChromiumModule(BrowserModule):
         console_path.write_text(
             json.dumps(self._console_messages, indent=2), encoding="utf-8"
         )
-
+        
+        await fetch_intercept.drain() 
         await tap.drain()
         await capture.drain()
         stats = capture.finalize()

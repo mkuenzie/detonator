@@ -378,6 +378,7 @@ Agents are now explicitly named in config. This replaces the flat
 - Multi-VM concurrent runs — single VM, sequential runs
 - Authentication on the host API — home lab, trusted network
 - Linux guest support — Windows first per user direction
+- Service worker / shared worker response body capture — the CDP tap in `agent/browser/cdp_response_tap.py` attaches per-page via `context.new_cdp_session(page)`, which does not reach worker-owned CDP targets. Fixing it requires `Target.setAutoAttach({flatten: true})` with child-session routing, but Playwright Python's public API doesn't expose flattened child sessions (`new_cdp_session` accepts only `Page | Frame`; `Worker` has no CDP method). Workarounds (poking Playwright privates, opening a parallel raw-CDP websocket) were rejected as too fragile for v1 — especially with the Patchright fork in the mix. Outer SW-initiated requests still land in HAR; we only lose bodies for SW-intercepted fetches. Revisit when Playwright exposes child CDP sessions or when a real analysis case traces a missed body to SW interception. The existing stash/sink in `cdp_response_tap.py` is target-agnostic, so the v2 change is additive: acquire a child session per `Target.attachedToTarget` with `type ∈ {service_worker, shared_worker, worker}`, `Network.enable`, and reuse the same handlers.
 
 ---
 

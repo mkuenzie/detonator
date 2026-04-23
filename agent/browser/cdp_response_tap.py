@@ -141,7 +141,7 @@ class CDPResponseTap:
                         prior.get("resource_type"),
                         prior.get("frame_url"),
                         _remote_addr(redirect_resp),
-                        _filter_resp_headers(redirect_resp.get("headers", {})),
+                        {k.lower(): v for k, v in redirect_resp.get("headers", {}).items()} or None,
                     )
                 )
 
@@ -173,7 +173,7 @@ class CDPResponseTap:
         entry = self._stash[request_id]
         entry["status"] = resp.get("status", 0)
         entry["mime_type"] = resp.get("mimeType")
-        entry["headers"] = _filter_resp_headers(resp.get("headers", {}))
+        entry["headers"] = {k.lower(): v for k, v in resp.get("headers", {}).items()} or None
         entry["remote_address"] = _remote_addr(resp)
         # frame_url: prefer the actual URL from the response over the frame ID
         frame = event.get("frame", {})
@@ -290,17 +290,6 @@ class CDPResponseTap:
 
 
 # ── Helpers ───────────────────────────────────────────────────────
-
-_RESP_HEADERS_ALLOWED = frozenset({
-    "content-type", "content-length", "content-encoding", "server", "referer"
-})
-
-
-def _filter_resp_headers(raw: dict[str, str]) -> dict[str, Any] | None:
-    lower = {k.lower(): v for k, v in raw.items()}
-    result: dict[str, Any] = {k: lower[k] for k in _RESP_HEADERS_ALLOWED if k in lower}
-    result["set_cookie_present"] = "set-cookie" in lower
-    return result or None
 
 
 def _remote_addr(resp: dict[str, Any]) -> str | None:
