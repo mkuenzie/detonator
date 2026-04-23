@@ -264,9 +264,13 @@ async def test_redirect_chain_emits_redirect_then_ok():
     outcomes = {r["outcome"] for r in sink.responses}
     assert "redirect" in outcomes
     assert "ok" in outcomes
-    # request_ids must be distinct so manifest rows are unique
+    # request_ids must be distinct — redirect gets #0, final gets #1
     ids = [r["request_id"] for r in sink.responses]
     assert len(set(ids)) == 2
+    redirect_entry = next(r for r in sink.responses if r["outcome"] == "redirect")
+    ok_entry = next(r for r in sink.responses if r["outcome"] == "ok")
+    assert redirect_entry["request_id"].endswith("#0")
+    assert ok_entry["request_id"].endswith("#1")
 
 
 async def test_detach_called_during_drain():

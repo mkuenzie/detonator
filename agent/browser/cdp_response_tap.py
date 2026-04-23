@@ -123,12 +123,14 @@ class CDPResponseTap:
 
         # Chromium reuses requestId across redirect chains.
         # If we already have a stash entry for this ID, the prior hop redirected.
+        next_chain_idx = 0
         if request_id in self._stash:
             prior = self._stash.pop(request_id)
+            prior_chain_idx = prior.get("chain_index", 0)
+            next_chain_idx = prior_chain_idx + 1
             redirect_resp = event.get("redirectResponse")
             if redirect_resp:
-                chain_idx = prior.get("chain_index", 0)
-                tagged_id = f"{request_id}#{chain_idx}"
+                tagged_id = f"{request_id}#{prior_chain_idx}"
                 self._schedule(
                     self._emit_redirect(
                         tagged_id,
@@ -144,7 +146,6 @@ class CDPResponseTap:
                 )
 
         frame_id = event.get("frameId", "")
-        chain_idx = (self._stash.get(request_id) or {}).get("chain_index", 0) + 1 if request_id in self._stash else 0
 
         # LRU eviction if stash hits soft cap.
         while len(self._stash) >= _STASH_SOFT_CAP:
@@ -160,7 +161,7 @@ class CDPResponseTap:
             "mime_type": None,
             "headers": None,
             "remote_address": None,
-            "chain_index": chain_idx,
+            "chain_index": next_chain_idx,
         }
         self._stash.move_to_end(request_id)
 

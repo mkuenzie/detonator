@@ -112,7 +112,6 @@ class PlaywrightChromiumModule(BrowserModule):
         capture = NetworkCapture(self._artifact_dir / "bodies")
         capture.attach(self._context)
         tap = CDPResponseTap(sink=capture)
-        await tap.attach_to_context(self._context)
 
         if stealth.enabled:
             await self._context.add_init_script(
@@ -121,6 +120,10 @@ class PlaywrightChromiumModule(BrowserModule):
             await self._context.add_init_script(path=str(_STEALTH_JS))
 
         self._page = await self._context.new_page()
+        # Attach CDP tap after new_page() so context.pages already includes this
+        # page. attach_to_context awaits Network.enable for every page in the list,
+        # guaranteeing it completes before goto() is called below.
+        await tap.attach_to_context(self._context)
         self._page.on("console", self._on_console)
         self._page.on("pageerror", self._on_page_error)
 
