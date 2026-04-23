@@ -6,13 +6,12 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 
 import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 1
 
 _DEFAULT_EXCLUSIONS: dict[str, list[str]] = {
     "whois": [
@@ -112,7 +111,8 @@ CREATE TABLE IF NOT EXISTS observable_links (
     confidence      REAL DEFAULT 1.0,
     first_seen      TEXT NOT NULL,
     last_seen       TEXT NOT NULL,
-    evidence_json   TEXT
+    evidence_json   TEXT,
+    UNIQUE(source_id, target_id, relationship)
 );
 
 CREATE TABLE IF NOT EXISTS campaign_observables (
@@ -189,28 +189,13 @@ class Database:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.executescript(_SCHEMA_SQL)
-        # Migration: add source_url column to existing artifacts tables (schema v1 → v2).
-        cursor = await self._db.execute("PRAGMA table_info(artifacts)")
-        columns = {row[1] for row in await cursor.fetchall()}
-        if "source_url" not in columns:
-            await self._db.execute("ALTER TABLE artifacts ADD COLUMN source_url TEXT")
-        # Migration v2 → v3: add content_hash index so refcount probes are O(log n).
-        await self._db.execute(
-            "CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(content_hash)"
-        )
-        # Migration v3 → v4: seed enrichment_exclusions from defaults (once only).
-        cursor = await self._db.execute(
-            "SELECT COUNT(*) FROM enrichment_exclusions"
-        )
-        row = await cursor.fetchone()
-        if row[0] == 0:
-            now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
-            for enricher_name, hosts in _DEFAULT_EXCLUSIONS.items():
-                for host in hosts:
-                    await self._db.execute(
-                        "INSERT OR IGNORE INTO enrichment_exclusions (enricher_name, host_pattern, created_at) VALUES (?, ?, ?)",
-                        (enricher_name, host, now),
-                    )
+        now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        for enricher_name, hosts in _DEFAULT_EXCLUSIONS.items():
+            for host in hosts:
+                await self._db.execute(
+                    "INSERT OR IGNORE INTO enrichment_exclusions (enricher_name, host_pattern, created_at) VALUES (?, ?, ?)",
+                    (enricher_name, host, now),
+                )
         await self._db.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
             ("version", str(SCHEMA_VERSION)),
@@ -418,7 +403,11 @@ class Database:
     ) -> None:
         await self.db.execute(
             """INSERT INTO observable_links (source_id, target_id, relationship, confidence, first_seen, last_seen, evidence_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(source_id, target_id, relationship) DO UPDATE SET
+                   last_seen=excluded.last_seen,
+                   confidence=excluded.confidence,
+                   evidence_json=COALESCE(excluded.evidence_json, evidence_json)""",
             (source_id, target_id, relationship, confidence, seen_at, seen_at, json.dumps(evidence) if evidence else None),
         )
         await self.db.commit()
