@@ -12,6 +12,7 @@ from typing import Any
 
 from agent.browser._driver import _DRIVER, async_playwright
 from agent.browser.base import BrowserModule, DetonationRequest, DetonationResult, StealthProfile
+from agent.browser.cdp_response_tap import CDPResponseTap
 from agent.browser.network_capture import NetworkCapture
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,8 @@ class PlaywrightChromiumModule(BrowserModule):
 
         capture = NetworkCapture(self._artifact_dir / "bodies")
         capture.attach(self._context)
+        tap = CDPResponseTap(sink=capture)
+        await tap.attach_to_context(self._context)
 
         if stealth.enabled:
             await self._context.add_init_script(
@@ -161,6 +164,7 @@ class PlaywrightChromiumModule(BrowserModule):
 
         except Exception as exc:
             logger.error("Navigation error: %s", exc)
+            await tap.drain()
             await capture.drain()
             stats = capture.finalize()
             return DetonationResult(error=str(exc), meta=self._build_meta(stats))
@@ -191,6 +195,7 @@ class PlaywrightChromiumModule(BrowserModule):
             json.dumps(self._console_messages, indent=2), encoding="utf-8"
         )
 
+        await tap.drain()
         await capture.drain()
         stats = capture.finalize()
 

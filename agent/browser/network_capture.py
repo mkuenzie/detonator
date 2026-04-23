@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
-CaptureOutcome = Literal["ok", "truncated", "empty", "redirect", "aborted", "disposed", "error"]
+CaptureOutcome = Literal["ok", "truncated", "empty", "redirect", "aborted", "disposed", "failed", "error"]
 
 _MIME_EXT: dict[str, str] = {
     "text/html": ".html",
@@ -47,9 +47,6 @@ _MIME_EXT: dict[str, str] = {
     "application/wasm": ".wasm",
 }
 
-# Response headers captured verbatim (not PII).  set-cookie presence is
-# recorded as a boolean flag; the value is never stored.
-_RESP_HEADERS = frozenset({"content-type", "content-length", "content-encoding", "server", "referer"})
 _REQ_HEADERS = frozenset({"content-type", "content-length", "referer"})
 
 
@@ -70,6 +67,7 @@ class CaptureStats:
     redirect: int = 0
     aborted: int = 0
     disposed: int = 0
+    failed: int = 0
     error: int = 0
 
     def _bump(self, outcome: CaptureOutcome) -> None:
@@ -87,6 +85,8 @@ class CaptureStats:
                 self.aborted += 1
             case "disposed":
                 self.disposed += 1
+            case "failed":
+                self.failed += 1
             case _:
                 self.error += 1
 
@@ -98,6 +98,7 @@ class CaptureStats:
             "redirect": self.redirect,
             "aborted": self.aborted,
             "disposed": self.disposed,
+            "failed": self.failed,
             "error": self.error,
         }
 
@@ -137,7 +138,6 @@ class NetworkCapture:
         """Subscribe to browser context events to begin capture."""
         self._bodies_dir.mkdir(parents=True, exist_ok=True)
         self._context = context
-        context.on("response", self._schedule_response)
         context.on("request", self._schedule_request)
 
     async def drain(self) -> None:
@@ -151,10 +151,6 @@ class NetworkCapture:
         self._drained = True
         if self._context is not None:
             try:
-                self._context.remove_listener("response", self._schedule_response)
-            except Exception:
-                pass
-            try:
                 self._context.remove_listener("request", self._schedule_request)
             except Exception:
                 pass
@@ -167,88 +163,50 @@ class NetworkCapture:
         """Return capture statistics after drain() has completed."""
         return self._stats
 
-    # ── Scheduling ────────────────────────────────────────────────
+    # ── Sink interface (used by CDPResponseTap) ───────────────────
 
-    def _schedule_response(self, response: Any) -> None:
-        task = asyncio.create_task(self._capture_response(response))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-
-    def _schedule_request(self, request: Any) -> None:
-        task = asyncio.create_task(self._capture_request(request))
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
-
-    # ── Response capture ──────────────────────────────────────────
-
-    async def _capture_response(self, response: Any) -> None:
-        try:
-            async with self._semaphore:
-                await self._do_capture_response(response)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.debug("capture_response unexpected error: %s", exc)
-            self._stats._bump("error")
-
-    async def _do_capture_response(self, response: Any) -> None:
-        status = 0
-        url = ""
-        method = "GET"
-        try:
-            status = response.status
-            url = response.url
-            method = (response.request.method or "GET").upper() if response.request else "GET"
-        except Exception:
-            pass
-
-        # Redirects carry no body worth capturing.
-        if 300 <= status < 400:
-            await self._append_manifest(
-                self._base_entry("response", url, method, status, None, 0, None, "redirect")
-            )
-            self._stats._bump("redirect")
-            return
-
-        try:
-            body = await response.body()
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            msg = str(exc).lower()
-            if "closed" in msg or "disposed" in msg or "target page" in msg:
-                outcome: CaptureOutcome = "disposed"
-            elif "aborted" in msg:
-                outcome = "aborted"
-            else:
-                outcome = "error"
-                logger.debug("response.body() failed for %s: %s", url, exc)
-            await self._append_manifest(
-                self._base_entry("response", url, method, status, None, 0, None, outcome)
-            )
-            self._stats._bump(outcome)
-            return
-
+    async def record_response(
+        self,
+        *,
+        request_id: str,
+        url: str,
+        method: str,
+        status: int,
+        mime_type: str | None,
+        resource_type: str | None,
+        frame_url: str | None,
+        remote_address: str | None,
+        response_headers: dict[str, Any] | None,
+        body: bytes | None,
+        outcome: CaptureOutcome,
+    ) -> None:
+        """Write a response capture entry to manifest (and body file if applicable)."""
         if not body:
-            await self._append_manifest(
-                self._base_entry("response", url, method, status, None, 0, None, "empty")
+            entry = self._base_entry(
+                "response", url, method, status, mime_type, 0, None,
+                "empty" if outcome == "ok" else outcome,
             )
-            self._stats._bump("empty")
+            entry["request_id"] = request_id
+            if resource_type is not None:
+                entry["resource_type"] = resource_type
+            if frame_url is not None:
+                entry["frame_url"] = frame_url
+            if remote_address is not None:
+                entry["remote_address"] = remote_address
+            if response_headers is not None:
+                entry["response_headers"] = response_headers
+            actual_outcome: CaptureOutcome = "empty" if outcome == "ok" else outcome
+            await self._append_manifest(entry)
+            self._stats._bump(actual_outcome)
             return
-
-        mime_type: str | None = None
-        try:
-            mime_type = (response.headers or {}).get("content-type")
-        except Exception:
-            pass
 
         size_actual = len(body)
         size_truncated: int | None = None
-        outcome = "ok"
+        actual_outcome = outcome
         if size_actual > self._max_body_bytes:
             body = body[: self._max_body_bytes]
             size_truncated = self._max_body_bytes
-            outcome = "truncated"
+            actual_outcome = "truncated"
 
         sha = hashlib.sha256(body).hexdigest()
         basename = f"{sha}{_ext_for_mime(mime_type)}"
@@ -263,12 +221,44 @@ class NetworkCapture:
             self._saved_hashes.add(sha)
 
         entry = self._base_entry(
-            "response", url, method, status, mime_type, size_actual, size_truncated, outcome,
-            basename=basename,
+            "response", url, method, status, mime_type, size_actual, size_truncated,
+            actual_outcome, basename=basename,
         )
-        await self._enrich_response(entry, response)
+        entry["request_id"] = request_id
+        if resource_type is not None:
+            entry["resource_type"] = resource_type
+        if frame_url is not None:
+            entry["frame_url"] = frame_url
+        if remote_address is not None:
+            entry["remote_address"] = remote_address
+        if response_headers is not None:
+            entry["response_headers"] = response_headers
+        await self._append_manifest(entry)
+        self._stats._bump(actual_outcome)
+
+    async def record_failure(
+        self,
+        *,
+        request_id: str,
+        url: str,
+        method: str,
+        outcome: CaptureOutcome,
+        reason: str | None = None,
+    ) -> None:
+        """Write a failure manifest entry (no body file)."""
+        entry = self._base_entry("response", url, method, 0, None, 0, None, outcome)
+        entry["request_id"] = request_id
+        if reason:
+            entry["failure_reason"] = reason
         await self._append_manifest(entry)
         self._stats._bump(outcome)
+
+    # ── Scheduling ────────────────────────────────────────────────
+
+    def _schedule_request(self, request: Any) -> None:
+        task = asyncio.create_task(self._capture_request(request))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     # ── Request capture ───────────────────────────────────────────
 
@@ -357,39 +347,6 @@ class NetworkCapture:
             "capture_outcome": outcome,
             "captured_at": datetime.now(UTC).isoformat(),
         }
-
-    async def _enrich_response(self, entry: dict[str, Any], response: Any) -> None:
-        """Best-effort: add resource_type, frame_url, remote_address, request_id, headers."""
-        try:
-            entry["resource_type"] = response.request.resource_type
-        except Exception:
-            pass
-
-        try:
-            frame = response.frame
-            entry["frame_url"] = frame.url if frame else None
-        except Exception:
-            pass
-
-        try:
-            sa = await response.server_addr()
-            if sa:
-                entry["remote_address"] = f"{sa['ipAddress']}:{sa['port']}"
-        except Exception:
-            pass
-
-        try:
-            entry["request_id"] = str(id(response.request))
-        except Exception:
-            pass
-
-        try:
-            headers = response.headers or {}
-            hs: dict[str, Any] = {k: headers[k] for k in _RESP_HEADERS if k in headers}
-            hs["set_cookie_present"] = "set-cookie" in headers
-            entry["response_headers"] = hs or None
-        except Exception:
-            pass
 
     async def _enrich_request(self, entry: dict[str, Any], request: Any) -> None:
         """Best-effort: add resource_type, frame_url, request_id, headers."""

@@ -1,7 +1,8 @@
 """Unit tests for agent.browser.network_capture.NetworkCapture.
 
-Uses stub event sources and response/request objects to test the capture
-logic without a real browser or Playwright installation.
+Covers the request-capture path (via context.on("request")) and the
+record_response / record_failure sink interface used by CDPResponseTap.
+The old response-event path (context.on("response")) has been removed.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ class StubContext:
     """Minimal browser context stub that stores event handlers."""
 
     def __init__(self) -> None:
-        self._handlers: dict[str, list] = {"response": [], "request": []}
+        self._handlers: dict[str, list] = {"request": []}
 
     def on(self, event: str, handler) -> None:
         self._handlers.setdefault(event, []).append(handler)
@@ -34,10 +35,6 @@ class StubContext:
             self._handlers[event].remove(handler)
         except (KeyError, ValueError):
             pass
-
-    def fire_response(self, response) -> None:
-        for h in list(self._handlers["response"]):
-            h(response)
 
     def fire_request(self, request) -> None:
         for h in list(self._handlers["request"]):
@@ -61,41 +58,6 @@ class StubRequest:
         self.frame = None
 
 
-class StubResponse:
-    def __init__(
-        self,
-        url: str = "https://example.com/",
-        method: str = "GET",
-        status: int = 200,
-        body: bytes = b"<html></html>",
-        mime_type: str = "text/html",
-        headers: dict | None = None,
-    ) -> None:
-        self.url = url
-        self.status = status
-        self.headers = {"content-type": mime_type, **(headers or {})}
-        self.request = StubRequest(url=url, method=method)
-        self._body = body
-        self.frame = None
-
-    async def body(self) -> bytes:
-        return self._body
-
-    async def server_addr(self) -> dict | None:
-        return None
-
-
-class ErrorResponse(StubResponse):
-    """Response whose body() raises an exception."""
-
-    def __init__(self, exc: Exception, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._exc = exc
-
-    async def body(self) -> bytes:
-        raise self._exc
-
-
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 
@@ -115,17 +77,29 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-# ── Basic capture ──────────────────────────────────────────────────────────
+# ── Sink interface (record_response / record_failure) ─────────────────────
 
 
-async def test_captures_response_body(tmp_path):
+async def test_record_response_writes_body_and_manifest(tmp_path):
     bodies_dir = tmp_path / "bodies"
-    ctx = StubContext()
     cap = NetworkCapture(bodies_dir)
+    ctx = StubContext()
     cap.attach(ctx)
 
     body = b"<html>hello</html>"
-    ctx.fire_response(StubResponse(body=body, mime_type="text/html"))
+    await cap.record_response(
+        request_id="r1",
+        url="https://example.com/",
+        method="GET",
+        status=200,
+        mime_type="text/html",
+        resource_type="document",
+        frame_url=None,
+        remote_address="1.2.3.4:443",
+        response_headers={"content-type": "text/html", "set_cookie_present": False},
+        body=body,
+        outcome="ok",
+    )
     await cap.drain()
     stats = cap.finalize()
 
@@ -137,8 +111,128 @@ async def test_captures_response_body(tmp_path):
     assert manifest[0]["capture_outcome"] == "ok"
     assert manifest[0]["direction"] == "response"
     assert manifest[0]["url"] == "https://example.com/"
+    assert manifest[0]["request_id"] == "r1"
+    assert manifest[0]["remote_address"] == "1.2.3.4:443"
     assert stats.captured == 1
     assert stats.error == 0
+
+
+async def test_record_response_none_body_empty_outcome(tmp_path):
+    bodies_dir = tmp_path / "bodies"
+    cap = NetworkCapture(bodies_dir)
+    cap.attach(StubContext())
+
+    await cap.record_response(
+        request_id="r2", url="https://example.com/empty", method="GET",
+        status=204, mime_type=None, resource_type=None, frame_url=None,
+        remote_address=None, response_headers=None, body=None, outcome="ok",
+    )
+    await cap.drain()
+    stats = cap.finalize()
+
+    manifest = _read_manifest(bodies_dir)
+    assert manifest[0]["capture_outcome"] == "empty"
+    assert stats.empty == 1
+
+
+async def test_record_response_redirect_outcome(tmp_path):
+    bodies_dir = tmp_path / "bodies"
+    cap = NetworkCapture(bodies_dir)
+    cap.attach(StubContext())
+
+    await cap.record_response(
+        request_id="r3", url="https://example.com/", method="GET",
+        status=302, mime_type=None, resource_type=None, frame_url=None,
+        remote_address=None, response_headers=None, body=None, outcome="redirect",
+    )
+    await cap.drain()
+    stats = cap.finalize()
+
+    manifest = _read_manifest(bodies_dir)
+    assert manifest[0]["capture_outcome"] == "redirect"
+    assert stats.redirect == 1
+
+
+async def test_record_response_truncates_at_cap(tmp_path):
+    bodies_dir = tmp_path / "bodies"
+    cap = NetworkCapture(bodies_dir, max_body_bytes=10)
+    cap.attach(StubContext())
+
+    body = b"A" * 100
+    await cap.record_response(
+        request_id="r4", url="https://example.com/big", method="GET",
+        status=200, mime_type="text/plain", resource_type=None, frame_url=None,
+        remote_address=None, response_headers=None, body=body, outcome="ok",
+    )
+    await cap.drain()
+    stats = cap.finalize()
+
+    manifest = _read_manifest(bodies_dir)
+    assert manifest[0]["capture_outcome"] == "truncated"
+    assert manifest[0]["size_actual"] == 100
+    assert manifest[0]["size_truncated"] == 10
+    assert stats.truncated == 1
+    assert stats.captured == 1
+
+
+async def test_record_response_deduplicates(tmp_path):
+    bodies_dir = tmp_path / "bodies"
+    cap = NetworkCapture(bodies_dir)
+    cap.attach(StubContext())
+
+    body = b"same content"
+    for url in ("https://a.example/", "https://b.example/"):
+        await cap.record_response(
+            request_id=url, url=url, method="GET",
+            status=200, mime_type="text/plain", resource_type=None, frame_url=None,
+            remote_address=None, response_headers=None, body=body, outcome="ok",
+        )
+    await cap.drain()
+
+    sha = _sha256(body)
+    files = list(bodies_dir.glob(f"{sha}.*"))
+    assert len(files) == 1
+
+    manifest = _read_manifest(bodies_dir)
+    assert len(manifest) == 2
+
+
+async def test_record_failure_writes_manifest_entry(tmp_path):
+    bodies_dir = tmp_path / "bodies"
+    cap = NetworkCapture(bodies_dir)
+    cap.attach(StubContext())
+
+    await cap.record_failure(
+        request_id="r5", url="https://example.com/gone", method="GET",
+        outcome="failed", reason="net::ERR_NAME_NOT_RESOLVED",
+    )
+    await cap.drain()
+    stats = cap.finalize()
+
+    manifest = _read_manifest(bodies_dir)
+    assert manifest[0]["capture_outcome"] == "failed"
+    assert manifest[0]["failure_reason"] == "net::ERR_NAME_NOT_RESOLVED"
+    assert stats.failed == 1
+
+
+async def test_record_failure_aborted(tmp_path):
+    bodies_dir = tmp_path / "bodies"
+    cap = NetworkCapture(bodies_dir)
+    cap.attach(StubContext())
+
+    await cap.record_failure(
+        request_id="r6", url="https://example.com/", method="GET",
+        outcome="aborted",
+    )
+    await cap.drain()
+    stats = cap.finalize()
+
+    manifest = _read_manifest(bodies_dir)
+    assert manifest[0]["capture_outcome"] == "aborted"
+    assert stats.aborted == 1
+
+
+# ── Request path (context.on("request")) ──────────────────────────────────
 
 
 async def test_captures_request_body(tmp_path):
@@ -178,177 +272,23 @@ async def test_request_without_post_data_is_skipped(tmp_path):
     assert _read_manifest(bodies_dir) == []
 
 
-# ── Outcome classification ─────────────────────────────────────────────────
-
-
-async def test_redirect_classified_correctly(tmp_path):
-    bodies_dir = tmp_path / "bodies"
-    ctx = StubContext()
-    cap = NetworkCapture(bodies_dir)
-    cap.attach(ctx)
-
-    ctx.fire_response(StubResponse(status=302, body=b"", mime_type="text/html"))
-    await cap.drain()
-    stats = cap.finalize()
-
-    manifest = _read_manifest(bodies_dir)
-    assert manifest[0]["capture_outcome"] == "redirect"
-    assert stats.redirect == 1
-    assert stats.captured == 0
-    assert not (bodies_dir).glob("*.html").__next__() if list(bodies_dir.glob("*.html")) else True
-
-
-async def test_empty_body_classified_correctly(tmp_path):
-    bodies_dir = tmp_path / "bodies"
-    ctx = StubContext()
-    cap = NetworkCapture(bodies_dir)
-    cap.attach(ctx)
-
-    ctx.fire_response(StubResponse(status=204, body=b"", mime_type=None))
-    await cap.drain()
-    stats = cap.finalize()
-
-    manifest = _read_manifest(bodies_dir)
-    assert manifest[0]["capture_outcome"] == "empty"
-    assert stats.empty == 1
-
-
-async def test_disposed_body_classified_correctly(tmp_path):
-    bodies_dir = tmp_path / "bodies"
-    ctx = StubContext()
-    cap = NetworkCapture(bodies_dir)
-    cap.attach(ctx)
-
-    ctx.fire_response(ErrorResponse(
-        exc=Exception("Target page, context or browser has been closed"),
-        status=200,
-    ))
-    await cap.drain()
-    stats = cap.finalize()
-
-    manifest = _read_manifest(bodies_dir)
-    assert manifest[0]["capture_outcome"] == "disposed"
-    assert stats.disposed == 1
-    assert stats.error == 0
-
-
-async def test_aborted_body_classified_correctly(tmp_path):
-    bodies_dir = tmp_path / "bodies"
-    ctx = StubContext()
-    cap = NetworkCapture(bodies_dir)
-    cap.attach(ctx)
-
-    ctx.fire_response(ErrorResponse(exc=Exception("net::ERR_ABORTED"), status=200))
-    await cap.drain()
-    stats = cap.finalize()
-
-    manifest = _read_manifest(bodies_dir)
-    assert manifest[0]["capture_outcome"] == "aborted"
-    assert stats.aborted == 1
-
-
-# ── Size cap / truncation ──────────────────────────────────────────────────
-
-
-async def test_body_truncated_at_cap(tmp_path):
-    bodies_dir = tmp_path / "bodies"
-    ctx = StubContext()
-    cap = NetworkCapture(bodies_dir, max_body_bytes=10)
-    cap.attach(ctx)
-
-    full_body = b"A" * 100
-    ctx.fire_response(StubResponse(body=full_body, mime_type="text/plain"))
-    await cap.drain()
-    stats = cap.finalize()
-
-    truncated = b"A" * 10
-    sha = _sha256(truncated)
-    assert (bodies_dir / f"{sha}.txt").read_bytes() == truncated
-
-    manifest = _read_manifest(bodies_dir)
-    assert manifest[0]["capture_outcome"] == "truncated"
-    assert manifest[0]["size_actual"] == 100
-    assert manifest[0]["size_truncated"] == 10
-    assert stats.captured == 1
-    assert stats.truncated == 1
-
-
-# ── Deduplication ─────────────────────────────────────────────────────────
-
-
-async def test_identical_bodies_write_one_file(tmp_path):
-    """Two URLs serving identical content share one body file; both in manifest."""
-    bodies_dir = tmp_path / "bodies"
-    ctx = StubContext()
-    cap = NetworkCapture(bodies_dir)
-    cap.attach(ctx)
-
-    body = b"same content"
-    ctx.fire_response(StubResponse(url="https://cdn-a.example/lib.js", body=body, mime_type="application/javascript"))
-    ctx.fire_response(StubResponse(url="https://cdn-b.example/lib.js", body=body, mime_type="application/javascript"))
-    await cap.drain()
-
-    sha = _sha256(body)
-    files = list(bodies_dir.glob(f"{sha}.*"))
-    assert len(files) == 1  # only one file on disk
-
-    manifest = _read_manifest(bodies_dir)
-    assert len(manifest) == 2  # both sources in manifest
-    urls = {e["url"] for e in manifest}
-    assert "https://cdn-a.example/lib.js" in urls
-    assert "https://cdn-b.example/lib.js" in urls
-
-
-# ── Concurrency cap ────────────────────────────────────────────────────────
-
-
-async def test_concurrency_cap(tmp_path):
-    """Peak concurrent body() calls must not exceed max_concurrent."""
-    bodies_dir = tmp_path / "bodies"
-    max_concurrent = 4
-    concurrent_count = 0
-    peak = 0
-    lock = asyncio.Lock()
-
-    class SlowResponse(StubResponse):
-        async def body(self) -> bytes:
-            nonlocal concurrent_count, peak
-            async with lock:
-                concurrent_count += 1
-                if concurrent_count > peak:
-                    peak = concurrent_count
-            await asyncio.sleep(0.01)
-            async with lock:
-                concurrent_count -= 1
-            return b"x" * 10
-
-    ctx = StubContext()
-    cap = NetworkCapture(bodies_dir, max_concurrent=max_concurrent)
-    cap.attach(ctx)
-
-    for i in range(50):
-        ctx.fire_response(SlowResponse(url=f"https://example.com/res{i}"))
-    await cap.drain()
-
-    assert peak <= max_concurrent
-
-
 # ── Drain lifecycle ────────────────────────────────────────────────────────
 
 
-async def test_drain_detaches_handler(tmp_path):
-    """After drain(), events fired at the context are no longer captured."""
+async def test_drain_detaches_request_handler(tmp_path):
+    """After drain(), request events fired at the context are no longer captured."""
     bodies_dir = tmp_path / "bodies"
     ctx = StubContext()
     cap = NetworkCapture(bodies_dir)
     cap.attach(ctx)
 
-    ctx.fire_response(StubResponse(url="https://example.com/before", body=b"before"))
+    # Fire a POST before drain — should be captured
+    ctx.fire_request(StubRequest(url="https://example.com/before", method="POST", post_data=b"before"))
     await cap.drain()
 
-    # Fire event after drain — should not be captured
-    ctx.fire_response(StubResponse(url="https://example.com/after", body=b"after_body_123"))
-    await asyncio.sleep(0.05)  # give any stray task time to run
+    # Fire after drain — must not be captured
+    ctx.fire_request(StubRequest(url="https://example.com/after", method="POST", post_data=b"after_extra"))
+    await asyncio.sleep(0.05)
 
     manifest = _read_manifest(bodies_dir)
     urls = [e.get("url") for e in manifest]
@@ -362,7 +302,7 @@ async def test_drain_is_idempotent(tmp_path):
     cap = NetworkCapture(bodies_dir)
     cap.attach(ctx)
 
-    ctx.fire_response(StubResponse(body=b"data"))
+    ctx.fire_request(StubRequest(url="https://example.com/", method="POST", post_data=b"data"))
     await cap.drain()
     await cap.drain()  # second call must be a no-op, not raise
 
@@ -399,13 +339,14 @@ async def test_manifest_tolerates_partial_last_line(tmp_path):
 
 
 def test_capture_stats_as_dict():
-    s = CaptureStats(captured=5, truncated=1, empty=2, redirect=3, aborted=1, disposed=0, error=0)
+    s = CaptureStats(captured=5, truncated=1, empty=2, redirect=3, aborted=1, disposed=0, failed=2, error=0)
     d = s.as_dict()
     assert d["captured"] == 5
     assert d["truncated"] == 1
     assert d["empty"] == 2
     assert d["redirect"] == 3
-    assert set(d.keys()) == {"captured", "truncated", "empty", "redirect", "aborted", "disposed", "error"}
+    assert d["failed"] == 2
+    assert set(d.keys()) == {"captured", "truncated", "empty", "redirect", "aborted", "disposed", "failed", "error"}
 
 
 def test_capture_stats_bump_truncated_counts_as_captured():
