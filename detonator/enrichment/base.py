@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
@@ -50,6 +50,8 @@ class Enricher(ABC):
     implements this interface. The pipeline fans out to all
     enrichers whose accepts() returns True.
     """
+
+    supports_exclusions: ClassVar[bool] = False
 
     def __init__(self, exclude_hosts: list[str] | None = None) -> None:
         self._exclude_hosts: set[str] = {

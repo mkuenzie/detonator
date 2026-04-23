@@ -34,6 +34,8 @@ _BAD_RECORDS = ("0.0.0.0", "::")
 class DnsEnricher(Enricher):
     """DNS enricher backed by dnspython's async resolver."""
 
+    supports_exclusions = True
+
     @property
     def name(self) -> str:
         return "dns"

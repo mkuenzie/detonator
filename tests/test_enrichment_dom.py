@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from detonator.enrichment.base import RunContext
-from detonator.enrichment.dom import DomExtractor
+from detonator.enrichment.core.dom import DomExtractor
 from detonator.models.observables import ObservableType, RelationshipType
 
 

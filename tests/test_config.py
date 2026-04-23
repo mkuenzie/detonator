@@ -20,8 +20,8 @@ def test_load_example_config():
     assert "direct" in cfg.egress
     assert cfg.egress["direct"].type == "direct"
     assert cfg.storage.data_dir == "data"
-    # New enrichment config should parse correctly
-    assert cfg.enrichment.modules == ["whois", "dns", "tls", "favicon", "navigations"]
+    # Plug-in enrichment modules should parse correctly (core enrichers not listed)
+    assert cfg.enrichment.modules == ["whois", "dns", "tls", "favicon"]
 
 
 def test_defaults():
@@ -29,7 +29,7 @@ def test_defaults():
     assert cfg.vm_provider.type == "proxmox"
     assert cfg.log_level == "INFO"
     assert cfg.timeouts.detonate_sec == 120
-    assert cfg.enrichment.modules == ["whois", "dns", "tls", "favicon", "navigations"]
+    assert cfg.enrichment.modules == ["whois", "dns", "tls", "favicon"]
     assert cfg.agents == []
 
 

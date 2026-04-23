@@ -90,11 +90,11 @@ class FilterConfig(BaseModel):
 
 
 class EnrichmentConfig(BaseModel):
-    """Enrichment pipeline configuration."""
+    """Plug-in enrichers to enable. Core enrichers (navigations, dom) always run."""
 
     model_config = ConfigDict(extra="ignore")
 
-    modules: list[str] = Field(default=["whois", "dns", "tls", "favicon", "navigations"])
+    modules: list[str] = Field(default=["whois", "dns", "tls", "favicon"])
 
 
 class AnalysisModuleConfig(BaseModel):

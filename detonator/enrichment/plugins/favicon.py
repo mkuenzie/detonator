@@ -42,6 +42,8 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; detonator-enrichment/1.0)"}
 class FaviconEnricher(Enricher):
     """Favicon hash enricher — fetches and fingerprints /favicon.ico."""
 
+    supports_exclusions = True
+
     @property
     def name(self) -> str:
         return "favicon"

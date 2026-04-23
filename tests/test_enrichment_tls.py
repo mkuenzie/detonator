@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from detonator.enrichment.base import RunContext
-from detonator.enrichment.tls import TlsEnricher
+from detonator.enrichment.plugins.tls import TlsEnricher
 from detonator.models.observables import ObservableType, RelationshipType
 
 
@@ -65,7 +65,7 @@ async def test_single_leaf_cert_no_chain(tmp_path: Path) -> None:
     leaf_der = b"\x00" * 32
 
     with (
-        patch("detonator.enrichment.tls._get_der_chain", return_value=[leaf_der]),
+        patch("detonator.enrichment.plugins.tls._get_der_chain", return_value=[leaf_der]),
         patch("cryptography.x509.load_der_x509_certificate") as mock_load,
     ):
         leaf_mock = _make_cert("example.com", "Let's Encrypt R3", "Let's Encrypt")
@@ -103,7 +103,7 @@ async def test_three_cert_chain_topology(tmp_path: Path) -> None:
     }
 
     with (
-        patch("detonator.enrichment.tls._get_der_chain", return_value=fake_chain),
+        patch("detonator.enrichment.plugins.tls._get_der_chain", return_value=fake_chain),
         patch("cryptography.x509.load_der_x509_certificate", side_effect=lambda der: cert_map[der]),
     ):
         enricher = TlsEnricher()
@@ -125,7 +125,7 @@ async def test_three_cert_chain_topology(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_tls_connect_failure_returns_error(tmp_path: Path) -> None:
-    with patch("detonator.enrichment.tls._get_der_chain", side_effect=OSError("refused")):
+    with patch("detonator.enrichment.plugins.tls._get_der_chain", side_effect=OSError("refused")):
         enricher = TlsEnricher()
         results = await enricher.enrich(_ctx(tmp_path))
 
@@ -140,7 +140,7 @@ async def test_cert_metadata_populated(tmp_path: Path) -> None:
     leaf_der = b"\x00" * 32
 
     with (
-        patch("detonator.enrichment.tls._get_der_chain", return_value=[leaf_der]),
+        patch("detonator.enrichment.plugins.tls._get_der_chain", return_value=[leaf_der]),
         patch("cryptography.x509.load_der_x509_certificate") as mock_load,
     ):
         mock_load.return_value = _make_cert("example.com", "Let's Encrypt R3", "Let's Encrypt")

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from detonator.enrichment.base import RunContext
-from detonator.enrichment.navigations import NavigationEnricher
+from detonator.enrichment.core.navigations import NavigationEnricher
 from detonator.models.observables import RelationshipType
 
 

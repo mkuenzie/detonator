@@ -81,7 +81,9 @@ detonator/
     providers/
       vm/                        # VMProvider ABC + Proxmox impl
       egress/                    # EgressProvider ABC + direct/vpn/tether (Phase 3)
-    enrichment/                  # Enricher ABC + whois/dns/tls/favicon (Phase 4)
+    enrichment/                  # Enricher ABC, HAR utility, pipeline (Phase 4)
+      core/                      # Artifact-parser enrichers that always run (navigations, dom)
+      plugins/                   # Opt-in external-lookup enrichers; add new ones here
     analysis/                    # chain.py, filter.py (Phase 5)
       modules/                   # AnalysisModule ABC + builtin + sigma + pipeline (Phase 5b)
       rules/                     # YAML rulepacks (Phase 5b)

@@ -277,53 +277,34 @@ class EnrichmentPipeline:
     ) -> EnrichmentPipeline:
         """Instantiate an ``EnrichmentPipeline`` from ``config.enrichment.modules``.
 
+        Core enrichers (navigations, dom) always run. Plug-in enrichers are
+        enabled by listing their short names in config.enrichment.modules.
         Unknown module names are logged and skipped so a typo in config doesn't
-        crash the orchestrator at startup.
+        crash the orchestrator at startup. If a name matches a core enricher it
+        is silently ignored (core enrichers are unconditional).
         """
-        enrichers: list[Enricher] = []
+        from detonator.enrichment.core import CORE_ENRICHERS
+        from detonator.enrichment.plugins import PLUGIN_ENRICHERS
 
+        core_enrichers: list[Enricher] = [cls_() for cls_ in CORE_ENRICHERS.values()]
+
+        plugin_enrichers: list[Enricher] = []
         for module_name in config.enrichment.modules:
-            enricher = _build_enricher(module_name)
-            if enricher is not None:
-                enrichers.append(enricher)
+            if module_name in CORE_ENRICHERS:
+                logger.info("Enrichment module %r is now a core enricher and always runs — ignoring config entry", module_name)
+                continue
+            if module_name in PLUGIN_ENRICHERS:
+                plugin_enrichers.append(PLUGIN_ENRICHERS[module_name]())
             else:
                 logger.warning("Unknown enrichment module %r — skipping", module_name)
 
+        enrichers = core_enrichers + plugin_enrichers
         logger.info(
-            "EnrichmentPipeline built with %d enrichers: %s",
-            len(enrichers),
-            [e.name for e in enrichers],
+            "EnrichmentPipeline built — Core: %s | Plug-ins enabled: %s",
+            [e.name for e in core_enrichers],
+            [e.name for e in plugin_enrichers],
         )
         return cls(enrichers=enrichers, database=database, artifact_store=artifact_store)
-
-
-def _build_enricher(name: str) -> Enricher | None:
-    """Instantiate a single enricher by name. Returns None if unrecognised."""
-    if name == "whois":
-        from detonator.enrichment.whois import WhoisEnricher
-        return WhoisEnricher()
-    if name == "dns":
-        from detonator.enrichment.dns import DnsEnricher
-        return DnsEnricher()
-    if name == "tls":
-        from detonator.enrichment.tls import TlsEnricher
-        return TlsEnricher()
-    if name == "favicon":
-        from detonator.enrichment.favicon import FaviconEnricher
-        return FaviconEnricher()
-    if name == "tld":
-        from detonator.enrichment.tld import TldEnricher
-        return TldEnricher()
-    if name == "dom":
-        from detonator.enrichment.dom import DomExtractor
-        return DomExtractor()
-    if name == "navigations":
-        from detonator.enrichment.navigations import NavigationEnricher
-        return NavigationEnricher()
-    if name == "hosting":
-        from detonator.enrichment.hosting import HostingEnricher
-        return HostingEnricher()
-    return None
 
 
 def _domain_obs_id(domain: str) -> object:

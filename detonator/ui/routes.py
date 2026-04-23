@@ -152,7 +152,10 @@ def _register_routes(app: FastAPI) -> None:
 
     # Config -------------------------------------------------------
 
-    _ENRICHERS_WITH_EXCLUSIONS = ["whois", "dns", "tls", "favicon", "tld"]
+    from detonator.enrichment.plugins import PLUGIN_ENRICHERS
+    _enrichers_with_exclusions = [
+        name for name, cls_ in PLUGIN_ENRICHERS.items() if cls_.supports_exclusions
+    ]
 
     @app.get("/ui/config", include_in_schema=False, response_class=HTMLResponse)
     async def config_page(request: Request):
@@ -174,7 +177,7 @@ def _register_routes(app: FastAPI) -> None:
                 "enrichment_modules": deps.config.enrichment.modules,
                 "exclusions": exclusions,
                 "exclusion_hosts": hosts,
-                "enrichers_with_exclusions": _ENRICHERS_WITH_EXCLUSIONS,
+                "enrichers_with_exclusions": _enrichers_with_exclusions,
             },
         )
 
@@ -233,7 +236,7 @@ def _register_routes(app: FastAPI) -> None:
             {
                 "exclusions": exclusions,
                 "exclusion_hosts": hosts,
-                "enrichers_with_exclusions": _ENRICHERS_WITH_EXCLUSIONS,
+                "enrichers_with_exclusions": _enrichers_with_exclusions,
             },
         )
 
@@ -257,7 +260,7 @@ def _register_routes(app: FastAPI) -> None:
             {
                 "exclusions": exclusions,
                 "exclusion_hosts": hosts,
-                "enrichers_with_exclusions": _ENRICHERS_WITH_EXCLUSIONS,
+                "enrichers_with_exclusions": _enrichers_with_exclusions,
             },
         )
 

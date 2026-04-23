@@ -47,6 +47,8 @@ _CONNECT_TIMEOUT = 10.0
 class TlsEnricher(Enricher):
     """TLS certificate chain enricher."""
 
+    supports_exclusions = True
+
     @property
     def name(self) -> str:
         return "tls"

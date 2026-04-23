@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 class WhoisEnricher(Enricher):
     """WHOIS enricher backed by asyncwhois."""
 
+    supports_exclusions = True
+
     @property
     def name(self) -> str:
         return "whois"

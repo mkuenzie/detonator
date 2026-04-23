@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from detonator.enrichment.base import RunContext
-from detonator.enrichment.hosting import HostingEnricher, _reverse_ip
+from detonator.enrichment.plugins.hosting import HostingEnricher, _reverse_ip
 from detonator.models.observables import ObservableType, RelationshipType
 
 
