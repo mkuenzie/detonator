@@ -1,0 +1,16 @@
+{% for host in exclusion_hosts %}
+<tr>
+  <td style="padding:0.3rem 0.6rem;font-family:monospace;white-space:nowrap">{{ host }}</td>
+  {% for enricher in enrichers_with_exclusions %}
+    {% set checked = enricher in exclusions and host in exclusions[enricher] %}
+    {% include "_exclusion_cell.html" %}
+  {% endfor %}
+  <td style="padding:0.3rem 0.4rem">
+    <form hx-post="/ui/config/exclusions/hosts/delete" hx-target="#exclusion-tbody" hx-swap="outerHTML"
+          style="margin:0">
+      <input type="hidden" name="host" value="{{ host }}">
+      <button type="submit" class="outline secondary" style="padding:0.1rem 0.4rem;font-size:0.8rem">✕</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}

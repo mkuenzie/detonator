@@ -295,6 +295,33 @@ The `data/` directory is created on startup relative to the working directory. S
 | `/techniques` | GET | List all techniques |
 | `/techniques/{id}/matches` | GET | Runs that matched this technique |
 
+### Enrichment exclusions
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/config/enrichment/exclusions` | GET | All exclusions as `{enricher: [host, ...]}` |
+| `/config/enrichment/exclusions` | POST | Add exclusion `{"enricher_name": "dns", "host_pattern": "cdn.example.com"}` |
+| `/config/enrichment/exclusions` | DELETE | Remove exclusion (same body shape as POST) |
+
+Exclusions are stored in SQLite and take effect on the next run without an orchestrator restart. The same data powers the matrix editor at `/ui/config`.
+
+**How matching works:** a host is excluded if it equals the pattern exactly *or* if it ends with `.<pattern>` — so `googleapis.com` suppresses `fonts.googleapis.com` too. Matching is case-insensitive. The logic lives in `Enricher._is_host_excluded()`.
+
+**Bulk editing via API:**
+```bash
+# Add a new exclusion for the dns enricher
+curl -X POST http://localhost:8080/config/enrichment/exclusions \
+  -H "Content-Type: application/json" \
+  -d '{"enricher_name":"dns","host_pattern":"malicious-cdn.example"}'
+
+# Remove it
+curl -X DELETE http://localhost:8080/config/enrichment/exclusions \
+  -H "Content-Type: application/json" \
+  -d '{"enricher_name":"dns","host_pattern":"malicious-cdn.example"}'
+```
+
+**Default exclusions** (seeded on first startup from `database.py`): well-known CDN and cloud hosts (cloudflare.com, googleapis.com, amazonaws.com, etc.) where the registrant is always the provider rather than the adversary. Edit via `/ui/config` or the API — changes survive restarts.
+
 ### System
 
 | Endpoint | Method | Description |

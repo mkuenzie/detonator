@@ -252,6 +252,7 @@ async def test_pipeline_runs_enrichers_and_writes_json(tmp_path: Path) -> None:
     mock_db.upsert_observable = AsyncMock()
     mock_db.link_run_observable = AsyncMock()
     mock_db.link_observables = AsyncMock()
+    mock_db.list_enrichment_exclusions = AsyncMock(return_value={})
 
     mock_store = MagicMock()
 
@@ -308,6 +309,7 @@ async def test_pipeline_failing_enricher_does_not_abort(tmp_path: Path) -> None:
     mock_db.upsert_observable = AsyncMock()
     mock_db.link_run_observable = AsyncMock()
     mock_db.link_observables = AsyncMock()
+    mock_db.list_enrichment_exclusions = AsyncMock(return_value={})
 
     # Build a broken enricher that always raises
     class _BrokenEnricher:

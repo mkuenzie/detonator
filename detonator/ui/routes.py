@@ -152,6 +152,8 @@ def _register_routes(app: FastAPI) -> None:
 
     # Config -------------------------------------------------------
 
+    _ENRICHERS_WITH_EXCLUSIONS = ["whois", "dns", "tls", "favicon", "tld"]
+
     @app.get("/ui/config", include_in_schema=False, response_class=HTMLResponse)
     async def config_page(request: Request):
         deps = _deps(request)
@@ -159,6 +161,8 @@ def _register_routes(app: FastAPI) -> None:
         egress = {
             name: cfg.model_dump() for name, cfg in deps.config.egress.items()
         }
+        exclusions = await deps.database.list_enrichment_exclusions()
+        hosts = await deps.database.list_exclusion_hosts()
         return TEMPLATES.TemplateResponse(
             request,
             "config.html",
@@ -167,7 +171,93 @@ def _register_routes(app: FastAPI) -> None:
                 "vm_provider": deps.config.vm_provider.model_dump(),
                 "egress": egress,
                 "timeouts": deps.config.timeouts.model_dump(),
-                "enrichment_modules": deps.config.enrichment.modules
+                "enrichment_modules": deps.config.enrichment.modules,
+                "exclusions": exclusions,
+                "exclusion_hosts": hosts,
+                "enrichers_with_exclusions": _ENRICHERS_WITH_EXCLUSIONS,
+            },
+        )
+
+    @app.post("/ui/config/exclusions/toggle", include_in_schema=False, response_class=HTMLResponse)
+    async def toggle_exclusion(
+        request: Request,
+        enricher: str = Form(...),
+        host: str = Form(...),
+    ):
+        deps = _deps(request)
+        excl = await deps.database.list_enrichment_exclusions()
+        if host in excl.get(enricher, set()):
+            await deps.database.remove_enrichment_exclusion(enricher, host)
+            checked = False
+        else:
+            await deps.database.add_enrichment_exclusion(enricher, host)
+            checked = True
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_exclusion_cell.html",
+            {"enricher": enricher, "host": host, "checked": checked},
+        )
+
+    @app.post("/ui/config/exclusions/hosts", include_in_schema=False, response_class=HTMLResponse)
+    async def add_exclusion_host(
+        request: Request,
+        host: str = Form(...),
+    ):
+        deps = _deps(request)
+        host = host.strip().lower()
+        if host:
+            # Add a row for the host with no enrichers checked yet (no rows inserted).
+            # We represent a "staged" host by inserting a sentinel enricher "__staged__"
+            # so it appears in list_exclusion_hosts(). On first real toggle, real rows
+            # are added and the sentinel can coexist harmlessly.
+            # Simpler: just insert a dummy row that list_exclusion_hosts picks up.
+            # Actually, list_exclusion_hosts returns DISTINCT host_patterns — we need
+            # at least one row to make the host appear. We use a no-op toggle instead:
+            # insert a placeholder only if no real rows exist for this host.
+            excl = await deps.database.list_enrichment_exclusions()
+            host_in_any = any(host in v for v in excl.values())
+            if not host_in_any:
+                # Insert a sentinel row so the host appears in the matrix.
+                from datetime import UTC, datetime
+                now = datetime.now(UTC).isoformat()
+                await deps.database.db.execute(
+                    "INSERT OR IGNORE INTO enrichment_exclusions (enricher_name, host_pattern, created_at) VALUES (?, ?, ?)",
+                    ("__staged__", host, now),
+                )
+                await deps.database.db.commit()
+        exclusions = await deps.database.list_enrichment_exclusions()
+        hosts = await deps.database.list_exclusion_hosts()
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_exclusion_tbody.html",
+            {
+                "exclusions": exclusions,
+                "exclusion_hosts": hosts,
+                "enrichers_with_exclusions": _ENRICHERS_WITH_EXCLUSIONS,
+            },
+        )
+
+    @app.post("/ui/config/exclusions/hosts/delete", include_in_schema=False, response_class=HTMLResponse)
+    async def delete_exclusion_host(
+        request: Request,
+        host: str = Form(...),
+    ):
+        deps = _deps(request)
+        host = host.strip().lower()
+        # Remove across all enrichers (including __staged__).
+        await deps.database.db.execute(
+            "DELETE FROM enrichment_exclusions WHERE host_pattern=?", (host,)
+        )
+        await deps.database.db.commit()
+        exclusions = await deps.database.list_enrichment_exclusions()
+        hosts = await deps.database.list_exclusion_hosts()
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_exclusion_tbody.html",
+            {
+                "exclusions": exclusions,
+                "exclusion_hosts": hosts,
+                "enrichers_with_exclusions": _ENRICHERS_WITH_EXCLUSIONS,
             },
         )
 

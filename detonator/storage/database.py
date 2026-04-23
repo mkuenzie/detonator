@@ -12,7 +12,32 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+
+_DEFAULT_EXCLUSIONS: dict[str, list[str]] = {
+    "whois": [
+        "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
+        "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
+        "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
+        "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+    ],
+    "dns": [
+        "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
+        "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
+        "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
+        "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+    ],
+    "tls": [
+        "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com",
+        "googleapis.com", "gstatic.com", "google.com", "facebook.com",
+    ],
+    "favicon": [
+        "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com", "cloudflare.com",
+        "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
+        "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
+        "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
+    ],
+}
 
 _SCHEMA_SQL = """
 -- Core tables
@@ -134,6 +159,15 @@ CREATE INDEX IF NOT EXISTS idx_technique_matches_run ON technique_matches(run_id
 CREATE INDEX IF NOT EXISTS idx_technique_matches_tech ON technique_matches(technique_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(content_hash);
 
+-- Enrichment exclusions — per-module host patterns skipped during enrichment
+CREATE TABLE IF NOT EXISTS enrichment_exclusions (
+    enricher_name   TEXT NOT NULL,
+    host_pattern    TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    PRIMARY KEY (enricher_name, host_pattern)
+);
+CREATE INDEX IF NOT EXISTS idx_enrichment_exclusions_host ON enrichment_exclusions(host_pattern);
+
 -- Schema version tracking
 CREATE TABLE IF NOT EXISTS schema_meta (
     key     TEXT PRIMARY KEY,
@@ -164,6 +198,19 @@ class Database:
         await self._db.execute(
             "CREATE INDEX IF NOT EXISTS idx_artifacts_hash ON artifacts(content_hash)"
         )
+        # Migration v3 → v4: seed enrichment_exclusions from defaults (once only).
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) FROM enrichment_exclusions"
+        )
+        row = await cursor.fetchone()
+        if row[0] == 0:
+            now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+            for enricher_name, hosts in _DEFAULT_EXCLUSIONS.items():
+                for host in hosts:
+                    await self._db.execute(
+                        "INSERT OR IGNORE INTO enrichment_exclusions (enricher_name, host_pattern, created_at) VALUES (?, ?, ?)",
+                        (enricher_name, host, now),
+                    )
         await self._db.execute(
             "INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)",
             ("version", str(SCHEMA_VERSION)),
@@ -574,6 +621,41 @@ class Database:
             (technique_id, run_id, confidence, json.dumps(evidence) if evidence else None),
         )
         await self.db.commit()
+
+    # ── Enrichment exclusions ─────────────────────────────────────
+
+    async def list_enrichment_exclusions(self) -> dict[str, set[str]]:
+        """Return {enricher_name: {host_pattern, ...}} for all exclusions."""
+        cursor = await self.db.execute(
+            "SELECT enricher_name, host_pattern FROM enrichment_exclusions ORDER BY enricher_name, host_pattern"
+        )
+        result: dict[str, set[str]] = {}
+        for row in await cursor.fetchall():
+            result.setdefault(row["enricher_name"], set()).add(row["host_pattern"])
+        return result
+
+    async def add_enrichment_exclusion(self, enricher_name: str, host_pattern: str) -> None:
+        from datetime import UTC, datetime
+        now = datetime.now(UTC).isoformat()
+        await self.db.execute(
+            "INSERT OR IGNORE INTO enrichment_exclusions (enricher_name, host_pattern, created_at) VALUES (?, ?, ?)",
+            (enricher_name, host_pattern, now),
+        )
+        await self.db.commit()
+
+    async def remove_enrichment_exclusion(self, enricher_name: str, host_pattern: str) -> None:
+        await self.db.execute(
+            "DELETE FROM enrichment_exclusions WHERE enricher_name=? AND host_pattern=?",
+            (enricher_name, host_pattern),
+        )
+        await self.db.commit()
+
+    async def list_exclusion_hosts(self) -> list[str]:
+        """Return distinct host patterns across all enrichers, sorted."""
+        cursor = await self.db.execute(
+            "SELECT DISTINCT host_pattern FROM enrichment_exclusions ORDER BY host_pattern"
+        )
+        return [row["host_pattern"] for row in await cursor.fetchall()]
 
     # ── Graph search & neighborhood ───────────────────────────────
 

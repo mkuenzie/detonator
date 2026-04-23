@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from detonator.config import DetonatorConfig, EnrichmentConfig, EnricherConfig, load_config
+from detonator.config import DetonatorConfig, EnrichmentConfig, load_config
 
 
 def test_load_example_config():
@@ -22,7 +22,6 @@ def test_load_example_config():
     assert cfg.storage.data_dir == "data"
     # New enrichment config should parse correctly
     assert cfg.enrichment.modules == ["whois", "dns", "tls", "favicon", "navigations"]
-    assert "jsdelivr.net" in cfg.enrichment.whois.exclude_hosts
 
 
 def test_defaults():
@@ -69,6 +68,7 @@ def test_default_agent_raises_when_empty():
 
 
 def test_enrichment_config_parses_from_toml():
+    """Old TOML with [enrichment.whois] exclude_hosts blocks is silently ignored."""
     content = b"""
 [enrichment]
 modules = ["whois", "dns"]
@@ -85,9 +85,8 @@ exclude_hosts = []
         cfg = load_config(f.name)
 
     assert cfg.enrichment.modules == ["whois", "dns"]
-    assert "example.com" in cfg.enrichment.whois.exclude_hosts
-    assert "badcdn.net" in cfg.enrichment.whois.exclude_hosts
-    assert cfg.enrichment.dns.exclude_hosts == []
+    # Exclusions are now DB-managed; old TOML fields are silently dropped.
+    assert not hasattr(cfg.enrichment, "whois")
 
 
 def test_old_enrichment_modules_key_rejected():

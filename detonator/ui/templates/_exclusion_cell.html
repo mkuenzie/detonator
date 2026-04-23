@@ -1,0 +1,9 @@
+<td style="text-align:center;padding:0.3rem 0.6rem">
+  <form hx-post="/ui/config/exclusions/toggle" hx-target="closest td" hx-swap="outerHTML"
+        style="margin:0;display:inline">
+    <input type="hidden" name="enricher" value="{{ enricher }}">
+    <input type="hidden" name="host" value="{{ host }}">
+    <input type="checkbox" onchange="this.form.requestSubmit()" style="cursor:pointer"
+           {% if checked %}checked{% endif %}>
+  </form>
+</td>

@@ -89,21 +89,12 @@ class FilterConfig(BaseModel):
     require_initiator_chain: bool = False
 
 
-class EnricherConfig(BaseModel):
-    """Per-enricher settings. Kept minimal; add fields as needs surface."""
-
-    exclude_hosts: list[str] = []
-
-
 class EnrichmentConfig(BaseModel):
     """Enrichment pipeline configuration."""
 
+    model_config = ConfigDict(extra="ignore")
+
     modules: list[str] = Field(default=["whois", "dns", "tls", "favicon", "navigations"])
-    whois: EnricherConfig = EnricherConfig()
-    dns: EnricherConfig = EnricherConfig()
-    tls: EnricherConfig = EnricherConfig()
-    favicon: EnricherConfig = EnricherConfig()
-    tld: EnricherConfig = EnricherConfig()
 
 
 class AnalysisModuleConfig(BaseModel):

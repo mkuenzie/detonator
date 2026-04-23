@@ -68,6 +68,11 @@ class RunSummary(BaseModel):
     error: str | None = None
 
 
+class EnrichmentExclusionBody(BaseModel):
+    enricher_name: str
+    host_pattern: str
+
+
 class CreateCampaignBody(BaseModel):
     name: str
     description: str = ""
@@ -255,6 +260,28 @@ def _register_routes(app: FastAPI) -> None:
                 logger.debug("get_state for agent %s failed: %s", agent.name, exc)
             out.append(entry)
         return out
+
+    @app.get("/config/enrichment/exclusions", summary="List enrichment exclusions")
+    async def list_enrichment_exclusions(request: Request) -> dict[str, list[str]]:
+        """Return all enrichment exclusions as {enricher_name: [host_pattern, ...]}."""
+        deps = _deps(request)
+        raw = await deps.database.list_enrichment_exclusions()
+        return {k: sorted(v) for k, v in raw.items()}
+
+    @app.post("/config/enrichment/exclusions", status_code=201, summary="Add enrichment exclusion")
+    async def add_enrichment_exclusion(
+        body: EnrichmentExclusionBody, request: Request
+    ) -> dict:
+        deps = _deps(request)
+        await deps.database.add_enrichment_exclusion(body.enricher_name, body.host_pattern)
+        return {"enricher_name": body.enricher_name, "host_pattern": body.host_pattern, "added": True}
+
+    @app.delete("/config/enrichment/exclusions", status_code=204, summary="Remove enrichment exclusion")
+    async def remove_enrichment_exclusion(
+        body: EnrichmentExclusionBody, request: Request
+    ) -> None:
+        deps = _deps(request)
+        await deps.database.remove_enrichment_exclusion(body.enricher_name, body.host_pattern)
 
     # ── Runs ─────────────────────────────────────────────────────
 
