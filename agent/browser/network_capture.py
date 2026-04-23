@@ -47,9 +47,6 @@ _MIME_EXT: dict[str, str] = {
     "application/wasm": ".wasm",
 }
 
-_REQ_HEADERS = frozenset({"content-type", "content-length", "referer"})
-
-
 def _ext_for_mime(mime_type: str | None) -> str:
     if not mime_type:
         return ".bin"
@@ -368,7 +365,7 @@ class NetworkCapture:
 
         try:
             headers = request.headers or {}
-            entry["request_headers"] = {k: headers[k] for k in _REQ_HEADERS if k in headers} or None
+            entry["request_headers"] = {k.lower(): v for k, v in headers.items()} or None
         except Exception:
             pass
 

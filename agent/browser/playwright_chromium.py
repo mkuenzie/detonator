@@ -170,6 +170,7 @@ class PlaywrightChromiumModule(BrowserModule):
 
         except Exception as exc:
             logger.error("Navigation error: %s", exc)
+            await fetch_intercept.drain()
             await tap.drain()
             await capture.drain()
             stats = capture.finalize()
