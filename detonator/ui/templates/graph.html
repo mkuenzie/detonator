@@ -25,6 +25,38 @@
   <div class="graph-layout">
     <aside class="graph-sidebar">
       <div id="search-results" class="search-results" hidden></div>
+
+      <details class="type-filter" open>
+        <summary>Filter observable types</summary>
+        <div class="type-filter-grid" id="obs-type-filters">
+          {% set obs_types = [
+            ("domain", "Domain"),
+            ("ip", "IP"),
+            ("url", "URL"),
+            ("favicon_hash", "Favicon"),
+            ("certificate", "Certificate"),
+            ("certificate_authority", "Cert Authority"),
+            ("hosting_provider", "Hosting Provider"),
+            ("asn", "ASN"),
+            ("registrant", "Registrant"),
+            ("email", "Email"),
+            ("phone", "Phone"),
+            ("crypto_wallet", "Crypto Wallet"),
+            ("tls_fingerprint", "TLS Fingerprint"),
+          ] %}
+          {% for value, label in obs_types %}
+          <label class="type-filter-item">
+            <input type="checkbox" class="obs-type-cb" value="{{ value }}" checked>
+            {{ label }}
+          </label>
+          {% endfor %}
+        </div>
+        <div class="type-filter-actions">
+          <button type="button" id="filter-all" class="secondary outline small">All</button>
+          <button type="button" id="filter-none" class="secondary outline small">None</button>
+        </div>
+      </details>
+
       <div id="node-detail" class="node-detail">
         <p class="muted">Search above, then click a result to load its neighborhood.</p>
       </div>

@@ -72,6 +72,37 @@
     }).run();
   }
 
+  // ── Type filters ---------------------------------------------------
+
+  function hiddenObsTypes() {
+    const unchecked = new Set();
+    document.querySelectorAll(".obs-type-cb").forEach((cb) => {
+      if (!cb.checked) unchecked.add(cb.value);
+    });
+    return unchecked;
+  }
+
+  function applyTypeFilters() {
+    const hidden = hiddenObsTypes();
+    cy.nodes().forEach((n) => {
+      if (n.data("node_type") !== "observable") return;
+      const show = !hidden.has(n.data("sublabel"));
+      n.style("display", show ? "element" : "none");
+    });
+  }
+
+  document.getElementById("obs-type-filters").addEventListener("change", applyTypeFilters);
+
+  document.getElementById("filter-all").addEventListener("click", () => {
+    document.querySelectorAll(".obs-type-cb").forEach((cb) => { cb.checked = true; });
+    applyTypeFilters();
+  });
+
+  document.getElementById("filter-none").addEventListener("click", () => {
+    document.querySelectorAll(".obs-type-cb").forEach((cb) => { cb.checked = false; });
+    applyTypeFilters();
+  });
+
   // ── Fetch + merge --------------------------------------------------
 
   async function expandNode(nodeType, entityId) {
@@ -85,6 +116,7 @@
     // cy.add() is additive; duplicate ids are silently rejected.
     cy.add(data.nodes);
     cy.add(data.edges);
+    applyTypeFilters();
     relayout();
     const center = cy.getElementById(data.center_id);
     if (center && center.nonempty()) {
