@@ -66,13 +66,31 @@ Open PowerShell as the `detonator` user:
 cd C:\Users\detonator
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install fastapi uvicorn playwright msvc-runtime
+pip install fastapi uvicorn playwright patchright msvc-runtime
 playwright install chromium
+patchright install chrome
 ```
 
-`playwright install chromium` installs the Playwright-managed Chromium fallback (used when `stealth.enabled = false`). The real Chrome install from step 4 is used by default.
+`playwright install chromium` installs the Playwright-managed Chromium fallback (used when `stealth.enabled = false` or when the Patchright driver is switched off). The real Chrome install from step 4 is used by default via Patchright.
+
+`patchright install chrome` installs Patchright's patched Chrome binaries, which patch the `Runtime.enable` CDP leak and several other fingerprint vectors that anti-bot systems check.
 
 > **Note:** `msvc-runtime` is required because `playwright`'s `greenlet` dependency (2.0+) links against the Microsoft Visual C++ runtime, which is not present on a fresh Windows install. Without it, `import greenlet` fails with `ImportError: DLL load failed while importing _greenlet: The specified module could not be found`. `msvc-runtime` drops the needed DLLs into the venv — no system-wide VC++ Redistributable installer required.
+
+### Switching browser drivers
+
+The active driver is controlled by a single constant in `agent/browser/_driver.py`:
+
+```python
+_DRIVER = "patchright"   # default — stealth-hardened, passes Cloudflare/DataDome
+# _DRIVER = "playwright"  # vanilla upstream — useful when debugging a Patchright-specific issue
+```
+
+To revert to vanilla Playwright:
+1. Change `_DRIVER = "playwright"` in `agent/browser/_driver.py`.
+2. Re-deploy the agent code to the VM (no reinstall needed — both packages are already installed).
+
+Every run records which driver was active in `DetonationResult.meta["browser_driver"]`, so a Patchright regression is answerable from run history alone.
 
 ### 5. Verify the agent starts
 

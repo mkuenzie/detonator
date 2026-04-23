@@ -10,7 +10,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agent.browser._driver import _DRIVER, async_playwright
 from agent.browser.base import BrowserModule, DetonationRequest, DetonationResult, StealthProfile
+from agent.browser.network_capture import NetworkCapture
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,7 @@ _STEALTH_JS = Path(__file__).parent / "stealth.js"
 
 
 class PlaywrightChromiumModule(BrowserModule):
-    """Browser automation via Playwright driving a real Chrome install.
+    """Browser automation via Playwright (or Patchright) driving a real Chrome install.
 
     Uses launch_persistent_context() so the profile looks like a real user
     session rather than a freshly-created automation context.  Stealth
@@ -42,14 +44,11 @@ class PlaywrightChromiumModule(BrowserModule):
         return "playwright_chromium"
 
     async def launch(self, artifact_dir: Path) -> None:
-        """Start Playwright.  The browser itself launches in detonate()."""
-        from playwright.async_api import async_playwright
-
+        """Start the driver.  The browser itself launches in detonate()."""
         self._artifact_dir = artifact_dir
         self._artifact_dir.mkdir(parents=True, exist_ok=True)
-
         self._playwright = await async_playwright().start()
-        logger.info("Playwright started (browser launches at detonate time)")
+        logger.info("Driver '%s' started (browser launches at detonate time)", _DRIVER)
 
     async def detonate(self, request: DetonationRequest) -> DetonationResult:
         assert self._playwright is not None, "call launch() first"
@@ -109,28 +108,16 @@ class PlaywrightChromiumModule(BrowserModule):
             user_data_dir, **context_kwargs
         )
 
-        # Force Playwright to materialize response bodies into the HAR
-        # attachments. Without this, main-frame document navigations (including
-        # the seed URL and redirect chain) stream directly to the renderer and
-        # their bodies never get written as _file entries — so they'd be absent
-        # from site_resource artifacts downstream.
-        async def _force_body(response: Any) -> None:
-            try:
-                await response.body()
-            except Exception:
-                pass
-
-        self._context.on("response", lambda r: asyncio.create_task(_force_body(r)))
+        capture = NetworkCapture(self._artifact_dir / "bodies")
+        capture.attach(self._context)
 
         if stealth.enabled:
-            # Inject locale so stealth.js can use it without hardcoding
             await self._context.add_init_script(
                 script=f"window.__stealthLocale__ = {json.dumps(stealth.locale)};"
             )
             await self._context.add_init_script(path=str(_STEALTH_JS))
 
         self._page = await self._context.new_page()
-
         self._page.on("console", self._on_console)
         self._page.on("pageerror", self._on_page_error)
 
@@ -145,7 +132,6 @@ class PlaywrightChromiumModule(BrowserModule):
 
         screenshot_paths: list[Path] = []
         screenshot_task = None
-
         if request.screenshot_interval_sec:
             screenshot_task = asyncio.create_task(
                 self._periodic_screenshots(request.screenshot_interval_sec, screenshot_paths)
@@ -175,7 +161,9 @@ class PlaywrightChromiumModule(BrowserModule):
 
         except Exception as exc:
             logger.error("Navigation error: %s", exc)
-            return DetonationResult(error=str(exc), meta=self._build_meta())
+            await capture.drain()
+            stats = capture.finalize()
+            return DetonationResult(error=str(exc), meta=self._build_meta(stats))
 
         finally:
             if screenshot_task:
@@ -203,6 +191,9 @@ class PlaywrightChromiumModule(BrowserModule):
             json.dumps(self._console_messages, indent=2), encoding="utf-8"
         )
 
+        await capture.drain()
+        stats = capture.finalize()
+
         await self._context.close()
         self._context = None
         self._page = None
@@ -213,7 +204,7 @@ class PlaywrightChromiumModule(BrowserModule):
             dom_path=dom_path,
             navigations_path=navigations_path,
             console_log_path=console_path,
-            meta=self._build_meta(),
+            meta=self._build_meta(stats),
         )
 
     @property
@@ -249,12 +240,17 @@ class PlaywrightChromiumModule(BrowserModule):
             "timestamp": time.time(),
         })
 
-    def _build_meta(self) -> dict[str, Any]:
-        return {
+    def _build_meta(self, stats: NetworkCapture | None = None) -> dict[str, Any]:
+        from agent.browser.network_capture import CaptureStats
+        meta: dict[str, Any] = {
             "browser_module": self.name,
             "browser": "chrome" if self._stealth_enabled else "chromium",
             "stealth_enabled": self._stealth_enabled,
+            "browser_driver": _DRIVER,
         }
+        if isinstance(stats, CaptureStats):
+            meta["capture_stats"] = stats.as_dict()
+        return meta
 
     async def _periodic_screenshots(
         self, interval_sec: int, paths: list[Path]

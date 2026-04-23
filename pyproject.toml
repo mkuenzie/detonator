@@ -32,6 +32,7 @@ agent = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "playwright>=1.43",
+    "patchright>=1.43",
 ]
 ui = [
     "jinja2>=3.1",

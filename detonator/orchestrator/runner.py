@@ -27,7 +27,7 @@ from uuid import UUID, uuid4
 
 from detonator.analysis.chain import extract_chain
 from detonator.analysis.filter import NoiseFilter
-from detonator.analysis.har_body_map import HarBodyRef, map_body_files
+from detonator.analysis.har_body_map import HarBodyRef, load_capture_manifest, map_body_files
 from detonator.analysis.modules.base import AnalysisContext
 from detonator.analysis.modules.pipeline import AnalysisPipeline
 from detonator.config import AgentInstanceConfig, DetonatorConfig
@@ -351,7 +351,10 @@ class Runner:
         downloaded = await agent.download_all(run_dir)
 
         # Parse the HAR once so the insert loop can classify + stamp body files
-        # with their originating URL in a single pass.
+        # with their originating URL in a single pass. Merge in the agent's
+        # bodies/extra.json sidecar for responses Playwright's HAR writer
+        # dropped (main-frame docs, some POST responses) — HAR wins on
+        # conflict since it's the canonical evidence record.
         body_map: dict[str, HarBodyRef] = {}
         har_path = run_dir / "har_full.har"
         if har_path.exists():
@@ -359,6 +362,11 @@ class Runner:
                 body_map = map_body_files(har_path)
             except Exception as exc:
                 self._log.warning("har_body_map failed: %s", exc)
+        try:
+            for basename, ref in load_capture_manifest(run_dir).items():
+                body_map.setdefault(basename, ref)
+        except Exception as exc:
+            self._log.warning("load_capture_manifest failed: %s", exc)
 
         for name, path, size in downloaded:
             ref = body_map.get(Path(name).name)
