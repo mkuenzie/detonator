@@ -26,6 +26,7 @@ enrichment = [
     "dnspython>=2.6",
     "cryptography>=42.0",
     "mmh3>=4.1",
+    "phonenumbers>=8.13",
 ]
 analysis = ["pyyaml>=6.0"]
 agent = [

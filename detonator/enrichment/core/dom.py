@@ -11,8 +11,9 @@ using regex and stdlib HTML parsing:
   - ``<meta http-equiv="refresh" content="...url=...">`` redirect targets
                         → Observable(type=URL)
 
-All pattern matching is case-insensitive where applicable.  False-positive rate
-is intentionally traded for recall at this stage — analyst review is expected.
+Phone candidates are first found by regex, then validated with the
+``phonenumbers`` library (libphonenumber).  Confirmed numbers are stored in
+E.164 format.  All other pattern matching is case-insensitive where applicable.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ import re
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
+
+import phonenumbers
 
 from urllib.parse import urlparse
 
@@ -131,13 +134,20 @@ class DomExtractor(Enricher):
         for m in _RE_EMAIL.finditer(html):
             _add(ObservableType.EMAIL, m.group(0).lower())
 
-        # Phone numbers — take group 2 (the digit sequence, stripped of country code)
+        # Phone numbers — regex finds candidates; phonenumbers validates and normalises to E.164.
         seen_phones: set[str] = set()
         for m in _RE_PHONE.finditer(html):
-            phone = re.sub(r"[\s\-().+]", "", m.group(0))
-            if phone not in seen_phones:
-                seen_phones.add(phone)
-                _add(ObservableType.PHONE, phone)
+            raw = m.group(0).strip()
+            try:
+                parsed = phonenumbers.parse(raw, "US")
+            except phonenumbers.NumberParseException:
+                continue
+            if not phonenumbers.is_valid_number(parsed):
+                continue
+            e164 = phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+            if e164 not in seen_phones:
+                seen_phones.add(e164)
+                _add(ObservableType.PHONE, e164)
 
         # Crypto wallets
         for m in _RE_BTC_LEGACY.finditer(html):
