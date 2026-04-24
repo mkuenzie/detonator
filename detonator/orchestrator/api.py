@@ -376,7 +376,7 @@ def _register_routes(app: FastAPI) -> None:
         if path is None:
             raise HTTPException(404, f"Artifact not found: {artifact_name}")
         # Path traversal guard — get_artifact_path already checks is_relative_to.
-        return FileResponse(path)
+        return FileResponse(path, filename=Path(artifact_name).name)
 
     @app.get("/runs/{run_id}/artifacts.zip")
     async def download_run_zip(run_id: UUID, request: Request) -> StreamingResponse:
