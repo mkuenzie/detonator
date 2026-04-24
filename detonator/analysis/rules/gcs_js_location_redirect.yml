@@ -2,8 +2,7 @@ title: GCS-hosted page with JavaScript location.href redirect
 id: d0facc87-7fff-434a-8396-e33b3e6729f1
 description: >
   Page is hosted on storage.googleapis.com and contains a window.location.href
-  assignment — a common pattern for GCS-based phishing kits that redirect
-  victims to a credential-harvesting domain after a brief landing page.
+  assignment — technique to use trusted domain for initial delivery links
 tags: [delivery, infrastructure]
 logsource:
   product: detonator
@@ -11,8 +10,10 @@ logsource:
 detection:
   host_gcs:
     navigation.hostname|contains: storage.googleapis.com
+  mime_type:
+    resource.mime_type: "text/html"
   js_location_redirect:
-    dom.html|contains: "window.location.href ="
-  condition: host_gcs and js_location_redirect
+    resource.body|contains: "window.location.href ="
+  condition: host_gcs and mime_type and js_location_redirect
 signature_type: delivery
 confidence: 0.92
