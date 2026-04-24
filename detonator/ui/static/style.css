@@ -204,6 +204,43 @@ details.json pre {
   border-radius: 4px;
 }
 
+/* Screenshot gallery */
+.screenshot-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.5rem 0 1rem;
+}
+.screenshot-gallery a {
+  display: block;
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: border-color 0.15s;
+}
+.screenshot-gallery a:hover {
+  border-color: var(--pico-primary);
+}
+.screenshot-gallery img {
+  display: block;
+  width: 200px;
+  height: 130px;
+  object-fit: cover;
+  object-position: top;
+}
+.screenshot-gallery .screenshot-label {
+  font-size: 0.75em;
+  color: var(--pico-muted-color);
+  padding: 0.2rem 0.4rem;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 /* Graph page */
 .graph-page { width: 100%; }
 .graph-header { margin-bottom: 0.75rem; }

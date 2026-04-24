@@ -86,9 +86,21 @@
   </h3>
   {% if artifacts %}
     {% set network_types = ['site_resource', 'request_body'] %}
-    {% set primary_artifacts = artifacts | rejectattr('type', 'in', network_types) | list %}
+    {% set screenshots = artifacts | selectattr('type', '==', 'screenshot') | list %}
+    {% set primary_artifacts = artifacts | rejectattr('type', 'in', network_types) | rejectattr('type', '==', 'screenshot') | list %}
     {% set site_resources = artifacts | selectattr('type', '==', 'site_resource') | list %}
     {% set request_bodies = artifacts | selectattr('type', '==', 'request_body') | list %}
+    {% if screenshots %}
+      <h4 class="muted" style="margin:0.5rem 0 0.25rem">Screenshots <span>({{ screenshots|length }})</span></h4>
+      <div class="screenshot-gallery">
+        {% for a in screenshots %}
+          <a href="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}" target="_blank" rel="noopener">
+            <img src="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}" alt="{{ a.path.split('/')[-1] if '/' in a.path else a.path }}" loading="lazy">
+            <div class="screenshot-label">{{ a.path.split('/')[-1] if '/' in a.path else a.path }}</div>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
     {% if primary_artifacts %}
       <h4 class="muted" style="margin:0.5rem 0 0.25rem">Capture artifacts</h4>
       <table>
