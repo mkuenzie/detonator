@@ -227,6 +227,7 @@ def test_load_capture_manifest_basic(tmp_path):
         method="GET",
         mime_type="text/html",
         source="capture_manifest",
+        captured_at="2026-04-23T10:00:00+00:00",
     )
 
 
@@ -398,3 +399,72 @@ def test_load_capture_manifest_extra_json_skips_entries_missing_url(tmp_path):
     )
     result = load_capture_manifest(tmp_path)
     assert list(result.keys()) == ["good.html"]
+
+
+# ── captured_at propagation ─────────────────────────────────────────────────
+
+
+def test_map_body_files_captured_at_from_started_datetime(tmp_path):
+    """map_body_files populates captured_at from entry startedDateTime."""
+    har = tmp_path / "har_full.har"
+    _write_har(
+        har,
+        [
+            {
+                "startedDateTime": "2026-04-24T01:46:49.068Z",
+                "request": {"url": "https://example.com/main.js", "method": "GET"},
+                "response": {
+                    "content": {"_file": "bodies/abc.bin", "mimeType": "application/javascript"}
+                },
+            },
+        ],
+    )
+    result = map_body_files(har)
+    assert result["abc.bin"].captured_at == "2026-04-24T01:46:49.068Z"
+
+
+def test_map_body_files_captured_at_none_when_missing(tmp_path):
+    """map_body_files sets captured_at to None when startedDateTime is absent."""
+    har = tmp_path / "har_full.har"
+    _write_har(
+        har,
+        [
+            {
+                "request": {"url": "https://example.com/style.css", "method": "GET"},
+                "response": {"content": {"_file": "bodies/def.bin"}},
+            },
+        ],
+    )
+    result = map_body_files(har)
+    assert result["def.bin"].captured_at is None
+
+
+def test_load_capture_manifest_captured_at_from_manifest(tmp_path):
+    """load_capture_manifest populates captured_at from the manifest entry."""
+    _write_manifest(
+        tmp_path,
+        [_manifest_entry(
+            "page.html",
+            "https://example.com/page",
+            mime_type="text/html",
+        )],
+    )
+    result = load_capture_manifest(tmp_path)
+    assert result["page.html"].captured_at == "2026-04-23T10:00:00+00:00"
+
+
+def test_load_capture_manifest_captured_at_none_when_missing(tmp_path):
+    """load_capture_manifest sets captured_at to None when field is absent."""
+    bodies = tmp_path / "bodies"
+    bodies.mkdir()
+    (bodies / "manifest.jsonl").write_text(
+        json.dumps({
+            "basename": "x.bin",
+            "url": "https://example.com/x",
+            "capture_outcome": "ok",
+            "size_actual": 10,
+        }) + "\n",
+        encoding="utf-8",
+    )
+    result = load_capture_manifest(tmp_path)
+    assert result["x.bin"].captured_at is None

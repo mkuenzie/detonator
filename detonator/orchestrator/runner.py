@@ -380,6 +380,7 @@ class Runner:
                 size=size,
                 content_hash=content_hash,
                 source_url=(ref.url if ref else None),
+                captured_at=(ref.captured_at if ref else None),
             )
 
     @staticmethod

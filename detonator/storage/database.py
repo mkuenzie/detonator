@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS artifacts (
     path            TEXT NOT NULL,
     size            INTEGER,
     content_hash    TEXT,
-    source_url      TEXT
+    source_url      TEXT,
+    captured_at     TEXT
 );
 
 -- Campaign tables
@@ -191,6 +192,12 @@ class Database:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.executescript(_SCHEMA_SQL)
+        # Idempotent migration: add captured_at to artifacts if missing (existing DBs).
+        try:
+            await self._db.execute("ALTER TABLE artifacts ADD COLUMN captured_at TEXT")
+            await self._db.commit()
+        except Exception:
+            pass  # column already exists
         now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
         for enricher_name, hosts in _DEFAULT_EXCLUSIONS.items():
             for host in hosts:
@@ -323,10 +330,11 @@ class Database:
         size: int | None = None,
         content_hash: str | None = None,
         source_url: str | None = None,
+        captured_at: str | None = None,
     ) -> None:
         await self.db.execute(
-            "INSERT INTO artifacts (run_id, type, path, size, content_hash, source_url) VALUES (?, ?, ?, ?, ?, ?)",
-            (run_id, artifact_type, path, size, content_hash, source_url),
+            "INSERT INTO artifacts (run_id, type, path, size, content_hash, source_url, captured_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (run_id, artifact_type, path, size, content_hash, source_url, captured_at),
         )
         await self.db.commit()
 

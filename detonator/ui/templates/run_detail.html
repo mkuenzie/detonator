@@ -52,11 +52,8 @@
   <h3>Navigation timeline</h3>
   {% if navigations %}
     <ol class="timeline">
-      {% for n in navigations %}
-        <li>
-          <span class="mono" style="word-break:break-all">{{ n.url }}</span>
-          <div class="muted mono" style="font-size:0.8em;margin-top:0.25rem">{{ n.timestamp|datetime }}</div>
-        </li>
+      {% for domain in navigations %}
+        <li><span class="mono">{{ domain }}</span></li>
       {% endfor %}
     </ol>
   {% else %}

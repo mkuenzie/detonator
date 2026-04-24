@@ -38,6 +38,7 @@ class HarBodyRef:
     method: str
     mime_type: str | None = None
     source: BodySource = field(default="har_file")
+    captured_at: str | None = None
 
 
 def map_body_files(har_path: Path) -> dict[str, HarBodyRef]:
@@ -72,6 +73,8 @@ def map_body_files(har_path: Path) -> dict[str, HarBodyRef]:
         except (KeyError, TypeError):
             continue
 
+        started_at: str | None = entry.get("startedDateTime") or None
+
         # Request body (outgoing). Record first so a response ref on the
         # same basename can overwrite it.
         post_data = request.get("postData") or {}
@@ -85,6 +88,7 @@ def map_body_files(har_path: Path) -> dict[str, HarBodyRef]:
                     method=method,
                     mime_type=(post_data.get("mimeType") or None),
                     source="har_file",
+                    captured_at=started_at,
                 )
 
         # Response body (downloaded). Wins over a prior request-body mapping.
@@ -101,6 +105,7 @@ def map_body_files(har_path: Path) -> dict[str, HarBodyRef]:
                     method=method,
                     mime_type=(content.get("mimeType") or None),
                     source="har_file",
+                    captured_at=started_at,
                 )
 
     return mapping
@@ -168,6 +173,7 @@ def _load_jsonl(path: Path) -> dict[str, HarBodyRef]:
                 method=(entry.get("method") or "GET").upper(),
                 mime_type=entry.get("mime_type"),
                 source="capture_manifest",
+                captured_at=entry.get("captured_at") or None,
             ),
         )
     return mapping
@@ -199,6 +205,7 @@ def _load_legacy_json(path: Path) -> dict[str, HarBodyRef]:
             method=(entry.get("method") or "GET").upper(),
             mime_type=entry.get("mime_type"),
             source="capture_manifest",
+            captured_at=entry.get("captured_at") or None,
         )
     return mapping
 

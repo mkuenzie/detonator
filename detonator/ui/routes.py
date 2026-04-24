@@ -397,17 +397,15 @@ def _register_routes(app: FastAPI) -> None:
         enrichment = _read_enrichment(deps, str(run_id))
 
         navigations = _read_navigations(deps, str(run_id))
-        main_navigations = [n for n in navigations if n.get("frame") == "main"]
-
-        har_artifact = next((a for a in artifacts if a.get("type") == "har_full"), None)
-        url_to_started: dict[str, str] = {}
-        if har_artifact and har_artifact.get("path"):
-            url_to_started = _index_har_started(Path(har_artifact["path"]))
-
-        network_types = {"site_resource", "request_body"}
-        for a in artifacts:
-            if a.get("type") in network_types and a.get("source_url"):
-                a["captured_at"] = url_to_started.get(a["source_url"])
+        _seen: set[str] = set()
+        nav_domains: list[str] = []
+        for n in navigations:
+            if n.get("frame") != "main":
+                continue
+            domain = urlparse(n.get("url", "")).netloc
+            if domain and domain not in _seen:
+                _seen.add(domain)
+                nav_domains.append(domain)
 
         site_resources = sorted(
             [a for a in artifacts if a.get("type") == "site_resource"],
@@ -446,7 +444,7 @@ def _register_routes(app: FastAPI) -> None:
                 "observables": run_observables,
                 "is_active": runner is not None,
                 "is_terminal": is_terminal,
-                "navigations": main_navigations,
+                "navigations": nav_domains,
                 "site_resources": site_resources,
                 "request_bodies": request_bodies,
             },
@@ -619,22 +617,6 @@ def _read_navigations(deps: AppState, run_id: str) -> list[dict]:
             return json.load(f)
     except Exception:
         return []
-
-
-def _index_har_started(har_path: Path) -> dict[str, str]:
-    try:
-        with open(har_path) as f:
-            har = json.load(f)
-        result: dict[str, str] = {}
-        for entry in har.get("log", {}).get("entries", []):
-            url = entry.get("request", {}).get("url")
-            started = entry.get("startedDateTime")
-            if url and started and url not in result:
-                result[url] = started
-        return result
-    except Exception:
-        logger.debug("_index_har_started failed for %s", har_path, exc_info=True)
-        return {}
 
 
 async def _load_run_observables(deps: AppState, run_id: str) -> list[dict]:

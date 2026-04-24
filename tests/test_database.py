@@ -70,6 +70,22 @@ async def test_artifact_source_url_round_trip(db: Database):
     assert by_hash["hash2"]["source_url"] == "https://src.com/script.js"
 
 
+async def test_artifact_captured_at_round_trip(db: Database):
+    """insert_artifact persists captured_at when supplied, None otherwise."""
+    await db.insert_run("r-cap", "https://cap.com", "direct", {}, "2026-04-24T00:00:00")
+
+    await db.insert_artifact("r-cap", "har_full", "/runs/r-cap/har.json", 1024, "hashA")
+    await db.insert_artifact(
+        "r-cap", "site_resource", "/runs/r-cap/body.bin", 512, "hashB",
+        source_url="https://cap.com/resource.js",
+        captured_at="2026-04-24T01:46:49.068Z",
+    )
+
+    by_hash = {a["content_hash"]: a for a in await db.get_artifacts("r-cap")}
+    assert by_hash["hashA"]["captured_at"] is None
+    assert by_hash["hashB"]["captured_at"] == "2026-04-24T01:46:49.068Z"
+
+
 async def test_observable_upsert_and_find(db: Database):
     await db.upsert_observable("obs-1", "domain", "example.com", "2026-04-09T00:00:00")
     await db.upsert_observable("obs-1", "domain", "example.com", "2026-04-10T00:00:00")
