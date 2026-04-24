@@ -7,9 +7,7 @@ using regex and stdlib HTML parsing:
   - US-format phone numbers → Observable(type=PHONE)
   - Bitcoin (Legacy + Bech32) and Ethereum wallet addresses
                         → Observable(type=CRYPTO_WALLET)
-  - ``<form action="...">`` targets → Observable(type=URL)
-  - ``<meta http-equiv="refresh" content="...url=...">`` redirect targets
-                        → Observable(type=URL)
+
 
 Phone candidates are first found by regex, then validated with the
 ``phonenumbers`` library (libphonenumber).  Confirmed numbers are stored in
@@ -157,15 +155,6 @@ class DomExtractor(Enricher):
         for m in _RE_ETH.finditer(html):
             _add(ObservableType.CRYPTO_WALLET, f"eth:{m.group(0).lower()}")
 
-        # HTML structure: form actions + meta refresh targets
-        parser = _DomParser()
-        parser.feed(html)
-
-        for action in parser.form_actions:
-            _add(ObservableType.URL, action)
-        for url in parser.meta_refresh_urls:
-            _add(ObservableType.URL, url)
-
         # Ensure seed domain observable is present so found_on link targets resolve.
         if seed_domain and seed_obs_id is not None:
             seed_obs = Observable(
@@ -196,9 +185,7 @@ class DomExtractor(Enricher):
                 unique_links.append(lnk)
 
         data = {
-            "counts": {str(k): v for k, v in counts.items()},
-            "form_actions": parser.form_actions,
-            "meta_refresh_urls": parser.meta_refresh_urls,
+            "counts": {str(k): v for k, v in counts.items()}
         }
 
         return EnrichmentResult(
@@ -208,30 +195,3 @@ class DomExtractor(Enricher):
             observables=unique_obs,
             observable_links=unique_links,
         )
-
-
-class _DomParser(HTMLParser):
-    """Minimal HTML parser that collects form actions and meta-refresh URLs."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.form_actions: list[str] = []
-        self.meta_refresh_urls: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        attr_map = {k.lower(): (v or "") for k, v in attrs}
-
-        if tag.lower() == "form":
-            action = attr_map.get("action", "").strip()
-            if action and action not in self.form_actions:
-                self.form_actions.append(action)
-
-        elif tag.lower() == "meta":
-            http_equiv = attr_map.get("http-equiv", "").lower()
-            if http_equiv == "refresh":
-                content = attr_map.get("content", "")
-                m = _RE_META_REFRESH_URL.search(content)
-                if m:
-                    url = m.group(1).strip().rstrip(";")
-                    if url and url not in self.meta_refresh_urls:
-                        self.meta_refresh_urls.append(url)
