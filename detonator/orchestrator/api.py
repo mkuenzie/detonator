@@ -50,7 +50,6 @@ class CreateRunBody(BaseModel):
     agent: str | None = None
     vm_id: str | None = None
     snapshot_id: str | None = None
-    screenshot_interval_sec: int | None = None
 
 
 class CreateRunResponse(BaseModel):
@@ -304,7 +303,6 @@ def _register_routes(app: FastAPI) -> None:
             interactive=body.interactive,
             vm_id=body.vm_id,
             snapshot_id=body.snapshot_id,
-            screenshot_interval_sec=body.screenshot_interval_sec,
         )
         egress_provider = await build_egress_provider(body.egress, deps.config)
         runner = Runner(

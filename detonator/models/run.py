@@ -55,7 +55,6 @@ class RunConfig(BaseModel):
     interactive: bool = False
     vm_id: str | None = None
     snapshot_id: str | None = None
-    screenshot_interval_sec: int | None = None
 
 
 class StateTransition(BaseModel):

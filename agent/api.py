@@ -36,7 +36,6 @@ class DetonateBody(BaseModel):
     timeout_sec: int = 60
     wait_for_idle: bool = True
     interactive: bool = False
-    screenshot_interval_sec: int | None = None
     stealth: StealthProfile | None = None
 
 
@@ -127,7 +126,6 @@ async def detonate(body: DetonateBody) -> StatusResponse:
         timeout_sec=body.timeout_sec,
         wait_for_idle=body.wait_for_idle,
         interactive=body.interactive,
-        screenshot_interval_sec=body.screenshot_interval_sec,
         stealth=body.stealth,
     )
     runtime._task = asyncio.create_task(runtime.run_detonation(request))

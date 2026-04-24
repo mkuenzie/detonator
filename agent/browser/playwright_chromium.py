@@ -40,6 +40,7 @@ class PlaywrightChromiumModule(BrowserModule):
         self._paused: asyncio.Event = asyncio.Event()
         self._paused.set()  # not paused initially
         self._stealth_enabled: bool = True
+        self._screenshot_tasks: list[asyncio.Task] = []
 
     @property
     def name(self) -> str:
@@ -140,11 +141,22 @@ class PlaywrightChromiumModule(BrowserModule):
         self._page.on("framenavigated", _on_framenavigated)
 
         screenshot_paths: list[Path] = []
-        screenshot_task = None
-        if request.screenshot_interval_sec:
-            screenshot_task = asyncio.create_task(
-                self._periodic_screenshots(request.screenshot_interval_sec, screenshot_paths)
-            )
+        self._screenshot_tasks = []
+
+        def _on_load(_: Any) -> None:
+            if self._page and self._artifact_dir:
+                path = self._artifact_dir / f"screenshot_{int(time.time() * 1000)}.png"
+
+                async def _capture() -> None:
+                    try:
+                        await self._page.screenshot(path=str(path))
+                        screenshot_paths.append(path)
+                    except Exception:
+                        logger.debug("Load-event screenshot failed (page may be navigating)")
+
+                self._screenshot_tasks.append(asyncio.create_task(_capture()))
+
+        self._page.on("load", _on_load)
 
         try:
             logger.info("Navigating to %s", request.url)
@@ -176,13 +188,8 @@ class PlaywrightChromiumModule(BrowserModule):
             stats = capture.finalize()
             return DetonationResult(error=str(exc), meta=self._build_meta(stats))
 
-        finally:
-            if screenshot_task:
-                screenshot_task.cancel()
-                try:
-                    await screenshot_task
-                except asyncio.CancelledError:
-                    pass
+        await asyncio.gather(*self._screenshot_tasks, return_exceptions=True)
+        self._screenshot_tasks = []
 
         final_screenshot = self._artifact_dir / f"screenshot_{int(time.time())}.png"
         await self._page.screenshot(path=str(final_screenshot), full_page=True)
@@ -265,15 +272,3 @@ class PlaywrightChromiumModule(BrowserModule):
             meta["capture_stats"] = stats.as_dict()
         return meta
 
-    async def _periodic_screenshots(
-        self, interval_sec: int, paths: list[Path]
-    ) -> None:
-        while True:
-            await asyncio.sleep(interval_sec)
-            if self._page and self._artifact_dir:
-                path = self._artifact_dir / f"screenshot_{int(time.time())}.png"
-                try:
-                    await self._page.screenshot(path=str(path))
-                    paths.append(path)
-                except Exception:
-                    logger.debug("Periodic screenshot failed (page may be navigating)")

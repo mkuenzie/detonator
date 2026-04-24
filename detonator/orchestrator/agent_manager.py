@@ -83,7 +83,6 @@ class AgentManager:
         timeout_sec: int = 60,
         wait_for_idle: bool = True,
         interactive: bool = False,
-        screenshot_interval_sec: int | None = None,
         stealth: Any | None = None,
     ) -> AgentStatus:
         payload: dict[str, Any] = {
@@ -91,7 +90,6 @@ class AgentManager:
             "timeout_sec": timeout_sec,
             "wait_for_idle": wait_for_idle,
             "interactive": interactive,
-            "screenshot_interval_sec": screenshot_interval_sec,
         }
         if stealth is not None:
             payload["stealth"] = (

@@ -33,7 +33,6 @@ class DetonationRequest(BaseModel):
     timeout_sec: int = 60
     wait_for_idle: bool = True
     interactive: bool = False
-    screenshot_interval_sec: int | None = None
     stealth: StealthProfile | None = None
 
 
