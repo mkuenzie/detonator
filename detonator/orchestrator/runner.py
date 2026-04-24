@@ -25,7 +25,7 @@ import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from detonator.analysis.chain import extract_chain
+from detonator.analysis.navigation import extract_navigation_scope
 from detonator.analysis.filter import NoiseFilter
 from detonator.analysis.har_body_map import HarBodyRef, load_capture_manifest, map_body_files
 from detonator.analysis.modules.base import AnalysisContext
@@ -443,7 +443,7 @@ class Runner:
         self._log.info("enrichment complete: %s", detail)
 
     async def _filter(self) -> None:
-        """Extract the initiator chain, classify noise, detect techniques."""
+        """Extract the navigation scope, classify noise, detect techniques."""
         artifact_dir = self.record.artifact_dir
         if not artifact_dir:
             await self._transition(RunState.FILTERING, "no artifact_dir — skipping")
@@ -458,33 +458,39 @@ class Runner:
 
         await self._transition(RunState.FILTERING)
 
-        async with asyncio.timeout(self.config.timeouts.filter_sec):
-            chain_result = extract_chain(har_path, self.record.config.url)
+        navigations_path = Path(artifact_dir) / "navigations.json"
 
-        if chain_result is None:
-            self._log.warning("chain extraction returned no result")
+        async with asyncio.timeout(self.config.timeouts.filter_sec):
+            nav_scope = extract_navigation_scope(
+                har_path,
+                navigations_path if navigations_path.exists() else None,
+                self.record.config.url,
+            )
+
+        if nav_scope is None:
+            self._log.warning("navigation-scope extraction returned no result")
             return
 
         noise_filter = NoiseFilter(
             noise_domains=self.config.filter.noise_domains,
             noise_resource_types=self.config.filter.noise_resource_types,
-            require_initiator_chain=self.config.filter.require_initiator_chain,
+            require_navigation_scope=self.config.filter.require_initiator_chain,
         )
-        filter_result = noise_filter.run(chain_result, str(self.record.id))
+        filter_result = noise_filter.run(nav_scope, str(self.record.id))
 
-        # Write har_chain.json
+        # Write har_navigation.json
         import json as _json
 
-        har_chain_bytes = _json.dumps(filter_result.har_chain, indent=2).encode("utf-8")
-        chain_path, chain_size, chain_hash = self.artifact_store.store_bytes(
-            str(self.record.id), "har_chain.json", har_chain_bytes
+        har_nav_bytes = _json.dumps(filter_result.har_navigation, indent=2).encode("utf-8")
+        nav_path, nav_size, nav_hash = self.artifact_store.store_bytes(
+            str(self.record.id), "har_navigation.json", har_nav_bytes
         )
         await self.database.insert_artifact(
             str(self.record.id),
-            ArtifactType.HAR_CHAIN,
-            str(chain_path),
-            size=chain_size,
-            content_hash=chain_hash,
+            ArtifactType.HAR_NAVIGATION,
+            str(nav_path),
+            size=nav_size,
+            content_hash=nav_hash,
         )
 
         # Write filter_result.json for analyst inspection
@@ -500,12 +506,12 @@ class Runner:
             content_hash=fr_hash,
         )
 
-        # Run analysis pipeline against the noise-filtered chain
+        # Run analysis pipeline against the noise-filtered navigation scope
         technique_hits = []
         if self.analysis_pipeline is not None:
             artifacts = await self.database.get_artifacts(str(self.record.id))
-            ctx = AnalysisContext.from_chain(
-                chain_result,
+            ctx = AnalysisContext.from_navigation_scope(
+                nav_scope,
                 filter_result,
                 artifact_dir,
                 str(self.record.id),
@@ -530,7 +536,7 @@ class Runner:
             )
 
         detail = (
-            f"chain={filter_result.chain_requests} "
+            f"scope={filter_result.scope_requests} "
             f"noise={filter_result.noise_requests} "
             f"techniques={len(technique_hits)}"
         )

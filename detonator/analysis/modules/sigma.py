@@ -5,13 +5,9 @@ evaluates them against an ``AnalysisContext``.
 
 Design notes
 ------------
-Sigma's YAML grammar is used for rule authoring, but the pysigma library
-itself is not a dependency: its primary API is a SIEM-backend compiler
-(Splunk, Elastic, etc.) that maps detections onto target query languages,
-not an in-process evaluator against a Python dict.  We parse with
+Sigma's YAML grammar is used for rule authoring. We parse with
 ``yaml.safe_load`` and implement the subset of modifier + condition
-semantics we support directly — this keeps us in control of the grammar
-and avoids a heavy dependency that would otherwise be unused at runtime.
+semantics we support directly.
 
 Supported modifiers (v1): ``contains``, ``startswith``, ``endswith``, ``re``,
 ``gte``, ``lte``.  Bare field (no modifier) = exact equality.
@@ -40,12 +36,12 @@ _SUPPORTED_MODIFIERS = {"contains", "startswith", "endswith", "re", "gte", "lte"
 _FIELD_MAP: dict[str, str] = {
     "seed.url": "seed_url",
     "seed.hostname": "seed_hostname",
-    "chain.hostname": "chain_hostnames",
-    "chain.url": "chain_urls",
-    "chain.initiator_type": "chain_initiator_types",
-    "chain.resource_type": "chain_resource_types",
-    "chain.redirect_domains": "redirect_domains",
-    "chain.cross_origin_redirect_count": "cross_origin_redirect_count",
+    "navigation.hostname": "navigation_hostnames",
+    "navigation.url": "navigation_urls",
+    "navigation.initiator_type": "navigation_initiator_types",
+    "navigation.resource_type": "navigation_resource_types",
+    "navigation.redirect_domains": "redirect_domains",
+    "navigation.cross_origin_redirect_count": "cross_origin_redirect_count",
     "dom.html": "dom_html",
     # Resource fields — evaluated per ResourceContent object, not against the whole context
     "resource.url":       "resources[].url",
@@ -115,7 +111,7 @@ class _ParsedRule:
 
 
 def _parse_modifier(field_with_modifier: str) -> tuple[str, str | None]:
-    """Split ``chain.hostname|contains`` into (``chain.hostname``, ``contains``)."""
+    """Split ``navigation.hostname|contains`` into (``navigation.hostname``, ``contains``)."""
     if "|" in field_with_modifier:
         field, modifier = field_with_modifier.split("|", 1)
         return field.strip(), modifier.strip().lower()

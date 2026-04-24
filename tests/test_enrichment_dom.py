@@ -25,7 +25,7 @@ def _write_dom(tmp_path: Path, html: str) -> None:
 
 @pytest.mark.asyncio
 async def test_phone_produces_found_on_link(tmp_path: Path) -> None:
-    _write_dom(tmp_path, "<p>Call us: (555) 867-5309</p>")
+    _write_dom(tmp_path, "<p>Call us: (415) 867-5309</p>")
     enricher = DomExtractor()
     results = await enricher.enrich(_ctx(tmp_path, "https://example.com"))
 
@@ -74,7 +74,7 @@ async def test_crypto_wallet_produces_found_on_link(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_found_on_link_target_is_seed_domain(tmp_path: Path) -> None:
-    _write_dom(tmp_path, "<p>Call (555) 867-5309</p>")
+    _write_dom(tmp_path, "<p>Call (415) 867-5309</p>")
     enricher = DomExtractor()
     results = await enricher.enrich(_ctx(tmp_path, "https://seed.example.com/path?q=1"))
 
@@ -101,7 +101,7 @@ async def test_found_on_evidence_includes_artifact(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_seed_domain_observable_present_in_result(tmp_path: Path) -> None:
-    _write_dom(tmp_path, "<p>Phone: (555) 123-4567</p>")
+    _write_dom(tmp_path, "<p>Phone: (415) 123-4567</p>")
     enricher = DomExtractor()
     results = await enricher.enrich(_ctx(tmp_path, "https://landing.example.com"))
 
@@ -112,9 +112,9 @@ async def test_seed_domain_observable_present_in_result(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_no_found_on_links_without_seed_url(tmp_path: Path) -> None:
     """If seed_url yields no hostname, no found_on links are created."""
-    _write_dom(tmp_path, "<p>Call (555) 000-0000</p>")
+    _write_dom(tmp_path, "<p>Call (415) 000-0000</p>")
     enricher = DomExtractor()
-    result = enricher._extract("<p>Call (555) 000-0000</p>", "dom.html", seed_url="")
+    result = enricher._extract("<p>Call (415) 000-0000</p>", "dom.html", seed_url="")
 
     found_on = [lk for lk in result.observable_links if lk.relationship == RelationshipType.FOUND_ON]
     assert len(found_on) == 0

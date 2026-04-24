@@ -41,13 +41,13 @@ async def test_modifier_contains_match(tmp_path: Path) -> None:
         title: Test contains match
         detection:
           sel:
-            chain.hostname|contains: googleapis.com
+            navigation.hostname|contains: googleapis.com
           condition: sel
         signature_type: infrastructure
         confidence: 0.8
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_hostnames=["storage.googleapis.com", "example.com"])
+    ctx = _ctx(navigation_hostnames=["storage.googleapis.com", "example.com"])
     hits = await module.analyze(ctx)
     assert any(h.name == "Test contains match" for h in hits)
 
@@ -58,13 +58,13 @@ async def test_modifier_contains_no_match(tmp_path: Path) -> None:
         title: Test contains no match
         detection:
           sel:
-            chain.hostname|contains: googleapis.com
+            navigation.hostname|contains: googleapis.com
           condition: sel
         signature_type: infrastructure
         confidence: 0.8
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_hostnames=["example.com", "other.net"])
+    ctx = _ctx(navigation_hostnames=["example.com", "other.net"])
     hits = await module.analyze(ctx)
     assert not hits
 
@@ -78,13 +78,13 @@ async def test_modifier_startswith_match(tmp_path: Path) -> None:
         title: Test startswith
         detection:
           sel:
-            chain.url|startswith: "data:"
+            navigation.url|startswith: "data:"
           condition: sel
         signature_type: evasion
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_urls=["data:text/html;base64,abc", "https://normal.com/"])
+    ctx = _ctx(navigation_urls=["data:text/html;base64,abc", "https://normal.com/"])
     hits = await module.analyze(ctx)
     assert any(h.name == "Test startswith" for h in hits)
 
@@ -95,13 +95,13 @@ async def test_modifier_startswith_no_match(tmp_path: Path) -> None:
         title: Test startswith no match
         detection:
           sel:
-            chain.url|startswith: "data:"
+            navigation.url|startswith: "data:"
           condition: sel
         signature_type: evasion
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_urls=["https://evil.com/page"])
+    ctx = _ctx(navigation_urls=["https://evil.com/page"])
     hits = await module.analyze(ctx)
     assert not hits
 
@@ -115,13 +115,13 @@ async def test_modifier_endswith_match(tmp_path: Path) -> None:
         title: Test endswith
         detection:
           sel:
-            chain.hostname|endswith: .workers.dev
+            navigation.hostname|endswith: .workers.dev
           condition: sel
         signature_type: infrastructure
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_hostnames=["my-worker.evil.workers.dev"])
+    ctx = _ctx(navigation_hostnames=["my-worker.evil.workers.dev"])
     hits = await module.analyze(ctx)
     assert any(h.name == "Test endswith" for h in hits)
 
@@ -132,13 +132,13 @@ async def test_modifier_endswith_no_match(tmp_path: Path) -> None:
         title: Test endswith no match
         detection:
           sel:
-            chain.hostname|endswith: .workers.dev
+            navigation.hostname|endswith: .workers.dev
           condition: sel
         signature_type: infrastructure
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_hostnames=["legit.example.com"])
+    ctx = _ctx(navigation_hostnames=["legit.example.com"])
     hits = await module.analyze(ctx)
     assert not hits
 
@@ -190,7 +190,7 @@ async def test_modifier_gte_match(tmp_path: Path) -> None:
         title: Test gte
         detection:
           sel:
-            chain.cross_origin_redirect_count|gte: 2
+            navigation.cross_origin_redirect_count|gte: 2
           condition: sel
         signature_type: delivery
         confidence: 0.75
@@ -207,7 +207,7 @@ async def test_modifier_gte_no_match(tmp_path: Path) -> None:
         title: Test gte no match
         detection:
           sel:
-            chain.cross_origin_redirect_count|gte: 2
+            navigation.cross_origin_redirect_count|gte: 2
           condition: sel
         signature_type: delivery
         confidence: 0.75
@@ -224,7 +224,7 @@ async def test_modifier_lte_match(tmp_path: Path) -> None:
         title: Test lte
         detection:
           sel:
-            chain.cross_origin_redirect_count|lte: 5
+            navigation.cross_origin_redirect_count|lte: 5
           condition: sel
         signature_type: delivery
         confidence: 0.5
@@ -244,17 +244,17 @@ async def test_condition_and_both_true(tmp_path: Path) -> None:
         title: Test and both true
         detection:
           sel_host:
-            chain.hostname|contains: docs.google.com
+            navigation.hostname|contains: docs.google.com
           sel_path:
-            chain.url|contains: /forms/
+            navigation.url|contains: /forms/
           condition: sel_host and sel_path
         signature_type: delivery
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
     ctx = _ctx(
-        chain_hostnames=["docs.google.com"],
-        chain_urls=["https://docs.google.com/forms/d/abc/viewform"],
+        navigation_hostnames=["docs.google.com"],
+        navigation_urls=["https://docs.google.com/forms/d/abc/viewform"],
     )
     hits = await module.analyze(ctx)
     assert any(h.name == "Test and both true" for h in hits)
@@ -266,9 +266,9 @@ async def test_condition_and_one_false(tmp_path: Path) -> None:
         title: Test and one false
         detection:
           sel_host:
-            chain.hostname|contains: docs.google.com
+            navigation.hostname|contains: docs.google.com
           sel_path:
-            chain.url|contains: /forms/
+            navigation.url|contains: /forms/
           condition: sel_host and sel_path
         signature_type: delivery
         confidence: 0.9
@@ -276,8 +276,8 @@ async def test_condition_and_one_false(tmp_path: Path) -> None:
     module = SigmaModule([str(tmp_path)])
     # hostname matches but no /forms/ in urls
     ctx = _ctx(
-        chain_hostnames=["docs.google.com"],
-        chain_urls=["https://docs.google.com/spreadsheets/d/abc"],
+        navigation_hostnames=["docs.google.com"],
+        navigation_urls=["https://docs.google.com/spreadsheets/d/abc"],
     )
     hits = await module.analyze(ctx)
     assert not hits
@@ -289,15 +289,15 @@ async def test_condition_or(tmp_path: Path) -> None:
         title: Test or
         detection:
           sel_a:
-            chain.hostname|endswith: .github.io
+            navigation.hostname|endswith: .github.io
           sel_b:
-            chain.hostname|endswith: .workers.dev
+            navigation.hostname|endswith: .workers.dev
           condition: sel_a or sel_b
         signature_type: infrastructure
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_hostnames=["evil.github.io"])
+    ctx = _ctx(navigation_hostnames=["evil.github.io"])
     hits = await module.analyze(ctx)
     assert any(h.name == "Test or" for h in hits)
 
@@ -308,13 +308,13 @@ async def test_condition_not(tmp_path: Path) -> None:
         title: Test not
         detection:
           sel_legit:
-            chain.hostname|contains: legit.example.com
+            navigation.hostname|contains: legit.example.com
           condition: not sel_legit
         signature_type: infrastructure
         confidence: 0.5
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_hostnames=["evil.example.com"])
+    ctx = _ctx(navigation_hostnames=["evil.example.com"])
     hits = await module.analyze(ctx)
     assert any(h.name == "Test not" for h in hits)
 
@@ -325,14 +325,14 @@ async def test_condition_not_inverted(tmp_path: Path) -> None:
         title: Test not inverted
         detection:
           sel_legit:
-            chain.hostname|contains: legit.example.com
+            navigation.hostname|contains: legit.example.com
           condition: not sel_legit
         signature_type: infrastructure
         confidence: 0.5
     """)
     module = SigmaModule([str(tmp_path)])
     # The hostname IS legit.example.com so 'not' should prevent a hit
-    ctx = _ctx(chain_hostnames=["legit.example.com"])
+    ctx = _ctx(navigation_hostnames=["legit.example.com"])
     hits = await module.analyze(ctx)
     assert not hits
 
@@ -346,14 +346,14 @@ async def test_list_field_any_element_matches(tmp_path: Path) -> None:
         title: Test list any
         detection:
           sel:
-            chain.hostname|endswith: .sharepoint.com
+            navigation.hostname|endswith: .sharepoint.com
           condition: sel
         signature_type: infrastructure
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
     # Only one of several hostnames matches
-    ctx = _ctx(chain_hostnames=["legit.example.com", "tenant.sharepoint.com", "cdn.net"])
+    ctx = _ctx(navigation_hostnames=["legit.example.com", "tenant.sharepoint.com", "cdn.net"])
     hits = await module.analyze(ctx)
     assert any(h.name == "Test list any" for h in hits)
 
@@ -367,7 +367,7 @@ async def test_rule_value_list_or(tmp_path: Path) -> None:
         title: Test value list or
         detection:
           sel:
-            chain.hostname|endswith:
+            navigation.hostname|endswith:
               - .github.io
               - .workers.dev
           condition: sel
@@ -375,7 +375,7 @@ async def test_rule_value_list_or(tmp_path: Path) -> None:
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_hostnames=["evil.workers.dev"])
+    ctx = _ctx(navigation_hostnames=["evil.workers.dev"])
     hits = await module.analyze(ctx)
     assert any(h.name == "Test value list or" for h in hits)
 
@@ -388,7 +388,7 @@ def test_unsupported_modifier_skipped(tmp_path: Path) -> None:
         title: Bad modifier
         detection:
           sel:
-            chain.hostname|cidr: 192.168.0.0/16
+            navigation.hostname|cidr: 192.168.0.0/16
           condition: sel
         signature_type: infrastructure
         confidence: 0.9
@@ -405,7 +405,7 @@ def test_missing_condition_skipped(tmp_path: Path) -> None:
         title: No condition
         detection:
           sel:
-            chain.hostname|contains: evil.com
+            navigation.hostname|contains: evil.com
         signature_type: infrastructure
         confidence: 0.9
     """)
@@ -440,13 +440,13 @@ async def test_explicit_uuid_id_used(tmp_path: Path) -> None:
         id: 12345678-1234-5678-1234-567812345678
         detection:
           sel:
-            chain.hostname|contains: evil.com
+            navigation.hostname|contains: evil.com
           condition: sel
         signature_type: infrastructure
         confidence: 0.9
     """)
     module = SigmaModule([str(tmp_path)])
-    ctx = _ctx(chain_hostnames=["evil.com"])
+    ctx = _ctx(navigation_hostnames=["evil.com"])
     hits = await module.analyze(ctx)
     assert hits
     assert hits[0].technique_id == "12345678-1234-5678-1234-567812345678"

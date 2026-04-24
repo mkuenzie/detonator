@@ -76,16 +76,16 @@ class TimeoutsConfig(BaseModel):
 
 
 class FilterConfig(BaseModel):
-    """Configuration for the HAR chain filter and technique detector."""
+    """Configuration for the navigation-scope filter and technique detector."""
 
     # Additional noise domains beyond the built-in defaults.
     noise_domains: list[str] = []
     # Additional resource types to classify as noise (supplements built-ins).
     noise_resource_types: list[str] = []
-    # When False (default) orphan entries (not reachable via initiator graph) are
-    # kept in har_chain.json — JS main-frame navigations produce orphans but their
-    # bodies are still valuable for analysis.  Set True to restore the old behavior
-    # that excludes them.
+    # When False (default) out-of-scope entries (not reachable from any
+    # navigation root via the initiator graph) are retained in har_navigation.json
+    # as long as they pass noise checks.  Set True to restrict the output strictly
+    # to scope-reachable URLs.  Name kept for TOML backward-compat.
     require_initiator_chain: bool = False
 
 

@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
-from detonator.analysis.chain import ChainResult, HarEntry
 from detonator.analysis.filter import FilterResult
+from detonator.analysis.navigation import HarEntry, NavigationScope
 
 # Stable namespace for deterministic technique UUIDs — matches the value in
 # filter.py so existing DB rows keep the same IDs after the migration.
@@ -54,18 +54,18 @@ class TechniqueHit(BaseModel):
 
 
 class AnalysisContext(BaseModel):
-    """Derived facts computed from chain + filter results, passed to modules."""
+    """Derived facts computed from navigation-scope + filter results, passed to modules."""
 
     run_id: str
     seed_url: str
     seed_hostname: str
 
     # Post-noise entries from the filter pass
-    chain_entries: list[HarEntry] = []
-    chain_hostnames: list[str] = []
-    chain_urls: list[str] = []
-    chain_initiator_types: list[str] = []
-    chain_resource_types: list[str] = []
+    navigation_entries: list[HarEntry] = []
+    navigation_hostnames: list[str] = []
+    navigation_urls: list[str] = []
+    navigation_initiator_types: list[str] = []
+    navigation_resource_types: list[str] = []
 
     # Redirect sub-graph
     redirect_domains: list[str] = []
@@ -81,28 +81,28 @@ class AnalysisContext(BaseModel):
     resources: list[ResourceContent] = []
 
     @classmethod
-    def from_chain(
+    def from_navigation_scope(
         cls,
-        chain_result: ChainResult,
+        nav_scope: NavigationScope,
         noise_filter_result: FilterResult,
         artifact_dir: str,
         run_id: str,
         seed_url: str,
         artifacts: list[dict] | None = None,
     ) -> AnalysisContext:
-        """Build context from chain extraction + noise filter results."""
+        """Build context from navigation-scope + noise filter results."""
         clean_urls: set[str] = {
             e.url for e in noise_filter_result.entries if not e.is_noise
         }
-        clean_entries = [e for e in chain_result.all_entries if e.url in clean_urls]
+        clean_entries = [e for e in nav_scope.all_entries if e.url in clean_urls]
 
         def _netloc(url: str) -> str:
             return urlparse(url).netloc or ""
 
-        chain_hostnames = list(dict.fromkeys(_netloc(e.url) for e in clean_entries if _netloc(e.url)))
-        chain_urls = [e.url for e in clean_entries]
-        chain_initiator_types = list(dict.fromkeys(e.initiator_type for e in clean_entries))
-        chain_resource_types = list(dict.fromkeys(e.resource_type for e in clean_entries))
+        nav_hostnames = list(dict.fromkeys(_netloc(e.url) for e in clean_entries if _netloc(e.url)))
+        nav_urls = [e.url for e in clean_entries]
+        nav_initiator_types = list(dict.fromkeys(e.initiator_type for e in clean_entries))
+        nav_resource_types = list(dict.fromkeys(e.resource_type for e in clean_entries))
 
         redirect_entries = [e for e in clean_entries if e.initiator_type == "redirect"]
         redirect_domains = sorted({_netloc(e.url) for e in redirect_entries if _netloc(e.url)})
@@ -122,11 +122,11 @@ class AnalysisContext(BaseModel):
             run_id=run_id,
             seed_url=seed_url,
             seed_hostname=urlparse(seed_url).hostname or "",
-            chain_entries=clean_entries,
-            chain_hostnames=chain_hostnames,
-            chain_urls=chain_urls,
-            chain_initiator_types=chain_initiator_types,
-            chain_resource_types=chain_resource_types,
+            navigation_entries=clean_entries,
+            navigation_hostnames=nav_hostnames,
+            navigation_urls=nav_urls,
+            navigation_initiator_types=nav_initiator_types,
+            navigation_resource_types=nav_resource_types,
             redirect_domains=redirect_domains,
             cross_origin_redirect_count=cross_origin_redirect_count,
             dom_html=dom_html,

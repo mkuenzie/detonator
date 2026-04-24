@@ -21,27 +21,30 @@ def _write_rule(tmp_path: Path, name: str, content: str) -> Path:
 
 
 def _minimal_ctx(resources: list[ResourceContent]) -> AnalysisContext:
-    from detonator.analysis.chain import ChainResult, HarEntry
     from detonator.analysis.filter import FilterResult
+    from detonator.analysis.navigation import NavigationScope
 
-    chain_result = ChainResult(
+    nav_scope = NavigationScope(
         seed_url="http://seed.com/",
-        chain_urls=[],
-        noise_urls=[],
+        navigation_events=[],
+        navigation_urls=[],
+        navigation_hosts=[],
+        scope_urls=[],
+        out_of_scope_urls=[],
         all_entries=[],
-        chain_entries=[],
-        noise_entries=[],
-        har_chain={},
-        har_all={},
+        scope_entries=[],
+        out_of_scope_entries=[],
+        har_full={},
+        har_navigation={},
     )
     filter_result = FilterResult(
         run_id="test",
         seed_url="http://seed.com/",
         total_requests=0,
-        chain_requests=0,
+        scope_requests=0,
         noise_requests=0,
         entries=[],
-        har_chain={},
+        har_navigation={},
     )
     ctx = AnalysisContext(
         run_id="test-run",
@@ -134,19 +137,17 @@ async def test_non_resource_rule_evaluates_once(tmp_path: Path) -> None:
         confidence: 0.9
         detection:
           selection:
-            chain.hostname|contains: "storage.googleapis.com"
+            navigation.hostname|contains: "storage.googleapis.com"
           condition: selection
         """,
     )
-    from detonator.analysis.chain import HarEntry
-    from detonator.analysis.filter import FilterResult
     from detonator.analysis.modules.base import AnalysisContext
 
     ctx = AnalysisContext(
         run_id="test-run",
         seed_url="http://seed.com/",
         seed_hostname="seed.com",
-        chain_hostnames=["storage.googleapis.com"],
+        navigation_hostnames=["storage.googleapis.com"],
     )
     module = SigmaModule(rules_dirs=[str(tmp_path)])
     hits = await module.analyze(ctx)

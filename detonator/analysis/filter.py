@@ -1,21 +1,16 @@
-"""Noise classification for HAR chain results.
+"""Noise classification for the navigation-scope HAR.
 
-After :func:`~detonator.analysis.chain.extract_chain` separates chain
-entries from unrelated requests, this module applies one additional pass:
-
-**Noise filter** — marks entries as noise even if they are in the
-initiator chain (known tracker domains, beacon/ping resource types).
-
-Technique detection has moved to :mod:`detonator.analysis.modules` and is
-driven by the :class:`~detonator.analysis.modules.pipeline.AnalysisPipeline`
-in the runner's filtering stage.
+After :func:`~detonator.analysis.navigation.extract_navigation_scope` unions
+the BFS results from every navigation root, this module applies one more
+pass: drop known tracker domains and noise resource types (``ping``,
+``preflight``, beacons, etc.).
 
 Usage::
 
-    result = extract_chain(har_path, seed_url)
-    filter  = NoiseFilter(noise_domains=config.filter_noise_domains)
-    fr      = filter.run(result, run_id)
-    # fr.har_chain  → filtered HAR dict to write as har_chain.json
+    scope  = extract_navigation_scope(har_path, nav_path, seed_url)
+    filter = NoiseFilter(noise_domains=config.filter_noise_domains)
+    fr     = filter.run(scope, run_id)
+    # fr.har_navigation  → filtered HAR dict to write as har_navigation.json
 """
 
 from __future__ import annotations
@@ -25,12 +20,12 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
-from detonator.analysis.chain import ChainResult, HarEntry
+from detonator.analysis.navigation import HarEntry, NavigationScope
 
 logger = logging.getLogger(__name__)
 
 # Noise classification reason strings
-REASON_NO_CHAIN = "not_in_initiator_chain"
+REASON_OUT_OF_SCOPE = "not_in_navigation_scope"
 REASON_TRACKER = "known_tracking_domain"
 REASON_RESOURCE_TYPE = "noise_resource_type"
 
@@ -76,7 +71,7 @@ _DEFAULT_NOISE_RTYPES: frozenset[str] = frozenset({
 class FilterEntry(BaseModel):
     url: str
     is_noise: bool
-    is_chain: bool = False   # True when reachable from seed via initiator graph
+    in_scope: bool = False   # True when reachable from any navigation root
     reasons: list[str] = []
 
 
@@ -84,10 +79,10 @@ class FilterResult(BaseModel):
     run_id: str
     seed_url: str
     total_requests: int
-    chain_requests: int
+    scope_requests: int
     noise_requests: int
     entries: list[FilterEntry]
-    har_chain: dict         # final filtered HAR (chain minus noise)
+    har_navigation: dict     # final filtered HAR (scope minus noise)
 
 
 # ── Helpers ─────────────────────────────────────────────────────
@@ -106,33 +101,35 @@ class NoiseFilter:
     *noise_domains* supplements (does not replace) the built-in default
     list.  Pass an empty list to use defaults only.
 
-    When *require_initiator_chain* is False (the default) entries that are not
-    reachable from the seed URL via the initiator graph are still kept — they
-    receive ``is_chain=False`` but are not marked as noise.  Set it to True to
-    restore the old behavior where orphan entries are always noise.
+    When *require_navigation_scope* is False (the default) entries outside
+    the navigation scope are still kept — they receive ``in_scope=False``
+    but are not marked as noise.  Set it to True to restrict the output
+    strictly to scope-reachable URLs.  The legacy alias
+    ``require_initiator_chain`` is accepted as a kwarg for TOML configs that
+    still use the old name.
     """
 
     def __init__(
         self,
         noise_domains: list[str] | None = None,
         noise_resource_types: list[str] | None = None,
-        require_initiator_chain: bool = False,
+        require_navigation_scope: bool | None = None,
+        *,
+        require_initiator_chain: bool | None = None,
     ) -> None:
         self._noise_domains: frozenset[str] = _DEFAULT_NOISE_DOMAINS | frozenset(noise_domains or [])
         self._noise_rtypes: frozenset[str] = _DEFAULT_NOISE_RTYPES | frozenset(noise_resource_types or [])
-        self._require_chain = require_initiator_chain
+        if require_navigation_scope is None:
+            require_navigation_scope = bool(require_initiator_chain) if require_initiator_chain is not None else False
+        self._require_scope = require_navigation_scope
 
-    def _classify(self, entry: HarEntry, chain_url_set: set[str]) -> tuple[list[str], bool]:
-        """Return (reasons, in_chain).
-
-        *in_chain* is True when the entry is reachable from the seed URL via
-        the initiator graph regardless of whether it is ultimately noise.
-        """
+    def _classify(self, entry: HarEntry, scope_url_set: set[str]) -> tuple[list[str], bool]:
+        """Return (reasons, in_scope)."""
         reasons: list[str] = []
-        in_chain = entry.url in chain_url_set
+        in_scope = entry.url in scope_url_set
 
-        if not in_chain and self._require_chain:
-            reasons.append(REASON_NO_CHAIN)
+        if not in_scope and self._require_scope:
+            reasons.append(REASON_OUT_OF_SCOPE)
 
         host = _netloc(entry.url).removeprefix("www.")
         if host in self._noise_domains or any(
@@ -143,59 +140,63 @@ class NoiseFilter:
         if entry.resource_type in self._noise_rtypes:
             reasons.append(REASON_RESOURCE_TYPE)
 
-        return reasons, in_chain
+        return reasons, in_scope
 
-    def run(self, chain_result: ChainResult, run_id: str) -> FilterResult:
+    def run(self, nav_scope: NavigationScope, run_id: str) -> FilterResult:
         """Classify all entries and produce a :class:`FilterResult`.
 
-        ``har_chain`` in the result is the final filtered HAR dict that
-        should be written as ``har_chain.json``.  It contains all non-noise
-        entries — including initiator-graph orphans when
-        ``require_initiator_chain`` is False (the default).
+        ``har_navigation`` in the result is the filtered HAR dict that should
+        be written as ``har_navigation.json``.  When ``require_navigation_scope``
+        is False (the default) out-of-scope entries that pass noise checks are
+        retained; otherwise only scope-reachable URLs survive.
         """
-        chain_url_set = set(chain_result.chain_urls)
+        scope_url_set = set(nav_scope.scope_urls)
 
         filter_entries: list[FilterEntry] = []
         clean_urls: set[str] = set()
 
-        for e in chain_result.all_entries:
-            reasons, in_chain = self._classify(e, chain_url_set)
+        for e in nav_scope.all_entries:
+            reasons, in_scope = self._classify(e, scope_url_set)
             is_noise = bool(reasons)
             filter_entries.append(
-                FilterEntry(url=e.url, is_noise=is_noise, is_chain=in_chain, reasons=reasons)
+                FilterEntry(url=e.url, is_noise=is_noise, in_scope=in_scope, reasons=reasons)
             )
             if not is_noise:
                 clean_urls.add(e.url)
 
-        chain_count = len(clean_urls)
-        noise_count = len(filter_entries) - chain_count
+        scope_count = len(clean_urls)
+        noise_count = len(filter_entries) - scope_count
 
-        # Build final filtered HAR.  When orphans are allowed (the default),
-        # start from the full HAR so orphan entries that are not noise appear in
-        # the output; otherwise restrict to the initiator-chain subset.
-        source_har = chain_result.har_all if (chain_result.har_all and not self._require_chain) else chain_result.har_chain
+        # Build final filtered HAR.  When out-of-scope entries are allowed (the
+        # default), start from the full HAR so they appear in the output if not
+        # noise; otherwise restrict to scope-reachable URLs only.
+        source_har = (
+            nav_scope.har_full
+            if (nav_scope.har_full and not self._require_scope)
+            else nav_scope.har_navigation
+        )
         raw_entries = source_har.get("log", {}).get("entries", [])
         final_raw = [
             e for e in raw_entries
             if e.get("request", {}).get("url", "") in clean_urls
         ]
         log_section = {**source_har.get("log", {}), "entries": final_raw}
-        har_chain_final = {**source_har, "log": log_section}
+        har_navigation_final = {**source_har, "log": log_section}
 
         logger.info(
-            "run=%s chain filter: total=%d chain=%d noise=%d",
+            "run=%s navigation filter: total=%d scope=%d noise=%d",
             run_id,
             len(filter_entries),
-            chain_count,
+            scope_count,
             noise_count,
         )
 
         return FilterResult(
             run_id=run_id,
-            seed_url=chain_result.seed_url,
+            seed_url=nav_scope.seed_url,
             total_requests=len(filter_entries),
-            chain_requests=chain_count,
+            scope_requests=scope_count,
             noise_requests=noise_count,
             entries=filter_entries,
-            har_chain=har_chain_final,
+            har_navigation=har_navigation_final,
         )

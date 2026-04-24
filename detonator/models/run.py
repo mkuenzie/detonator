@@ -30,7 +30,7 @@ class EgressType(StrEnum):
 
 class ArtifactType(StrEnum):
     HAR_FULL = "har_full"
-    HAR_CHAIN = "har_chain"
+    HAR_NAVIGATION = "har_navigation"
     SCREENSHOT = "screenshot"
     DOM = "dom"
     CONSOLE = "console"

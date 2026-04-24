@@ -1,4 +1,4 @@
-"""Tests for Phase D — ResourceContent loading in AnalysisContext.from_chain."""
+"""Tests for Phase D — ResourceContent loading in AnalysisContext.from_navigation_scope."""
 
 from __future__ import annotations
 
@@ -47,34 +47,37 @@ def _ctx_from_artifacts(
     artifacts: list[dict],
     har_entries: list[dict] | None = None,
 ) -> AnalysisContext:
-    """Build an AnalysisContext with minimal chain/filter stubs."""
-    from detonator.analysis.chain import ChainResult, HarEntry
-    from detonator.analysis.filter import FilterResult, FilterEntry
+    """Build an AnalysisContext with minimal navigation-scope/filter stubs."""
+    from detonator.analysis.filter import FilterResult
+    from detonator.analysis.navigation import NavigationScope
 
-    chain_result = ChainResult(
+    nav_scope = NavigationScope(
         seed_url="http://seed.com/",
-        chain_urls=[],
-        noise_urls=[],
+        navigation_events=[],
+        navigation_urls=[],
+        navigation_hosts=[],
+        scope_urls=[],
+        out_of_scope_urls=[],
         all_entries=[],
-        chain_entries=[],
-        noise_entries=[],
-        har_chain={},
-        har_all={},
+        scope_entries=[],
+        out_of_scope_entries=[],
+        har_full={},
+        har_navigation={},
     )
     filter_result = FilterResult(
         run_id="test",
         seed_url="http://seed.com/",
         total_requests=0,
-        chain_requests=0,
+        scope_requests=0,
         noise_requests=0,
         entries=[],
-        har_chain={},
+        har_navigation={},
     )
     if har_entries:
         _make_har(tmp_path, har_entries)
 
-    return AnalysisContext.from_chain(
-        chain_result,
+    return AnalysisContext.from_navigation_scope(
+        nav_scope,
         filter_result,
         str(tmp_path),
         "test-run",

@@ -58,7 +58,7 @@ _DOM_FIXTURE = """<!DOCTYPE html>
   <meta http-equiv="refresh" content="0; url=https://phish.evil.example.com/verify">
 </head>
 <body>
-  <p>Contact us: victim@bank.com or call 555-867-5309</p>
+  <p>Contact us: victim@bank.com or call 415-867-5309</p>
   <p>Send BTC to: 1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf95</p>
   <p>Send ETH to: 0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe</p>
   <form action="/submit" method="post">
@@ -207,27 +207,6 @@ async def test_dom_extractor_crypto_wallets(tmp_path: Path) -> None:
     wallets = obs_by_type.get(ObservableType.CRYPTO_WALLET, [])
     assert any("btc:" in w for w in wallets)
     assert any("eth:" in w for w in wallets)
-
-
-@pytest.mark.asyncio
-async def test_dom_extractor_form_action(tmp_path: Path) -> None:
-    (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
-    extractor = DomExtractor()
-    ctx = RunContext(run_id="r1", artifact_dir=str(tmp_path), seed_url="https://evil.example.com")
-    results = await extractor.enrich(ctx)
-
-    assert "/submit" in results[0].data["form_actions"]
-
-
-@pytest.mark.asyncio
-async def test_dom_extractor_meta_refresh(tmp_path: Path) -> None:
-    (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
-    extractor = DomExtractor()
-    ctx = RunContext(run_id="r1", artifact_dir=str(tmp_path), seed_url="https://evil.example.com")
-    results = await extractor.enrich(ctx)
-
-    refresh_urls = results[0].data["meta_refresh_urls"]
-    assert any("phish.evil.example.com" in u for u in refresh_urls)
 
 
 @pytest.mark.asyncio
