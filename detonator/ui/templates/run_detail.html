@@ -48,6 +48,22 @@
   </article>
 </section>
 
+<section>
+  <h3>Navigation timeline</h3>
+  {% if navigations %}
+    <ol class="timeline">
+      {% for n in navigations %}
+        <li>
+          <span class="mono" style="word-break:break-all">{{ n.url }}</span>
+          <div class="muted mono" style="font-size:0.8em;margin-top:0.25rem">{{ n.timestamp|datetime }}</div>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="muted">No navigations captured.</p>
+  {% endif %}
+</section>
+
 {% if can_resume %}
 <section>
   <article class="card" style="border-left:3px solid var(--pico-primary)">
@@ -63,23 +79,6 @@
 {% endif %}
 
 <section>
-  <h3>State timeline</h3>
-  {% if transitions %}
-    <ol class="timeline">
-      {% for t in transitions %}
-        <li>
-          <span class="status-badge {{ t.to_state }}">{{ t.to_state }}</span>
-          <div class="muted mono" style="font-size:0.8em;margin-top:0.25rem">{{ t.timestamp|datetime }}</div>
-          {% if t.detail %}<div class="muted mono" style="font-size:0.8em">{{ t.detail }}</div>{% endif %}
-        </li>
-      {% endfor %}
-    </ol>
-  {% else %}
-    <p class="muted">No transitions recorded yet.</p>
-  {% endif %}
-</section>
-
-<section>
   <h3 style="display:flex;align-items:center;gap:1rem">
     Artifacts <span class="muted">({{ artifacts|length }})</span>
     <a href="/runs/{{ run.id }}/artifacts.zip" role="button" class="secondary" style="font-size:0.85rem;padding:0.25rem 0.75rem">Download zip</a>
@@ -88,8 +87,6 @@
     {% set network_types = ['site_resource', 'request_body'] %}
     {% set screenshots = artifacts | selectattr('type', '==', 'screenshot') | list %}
     {% set primary_artifacts = artifacts | rejectattr('type', 'in', network_types) | rejectattr('type', '==', 'screenshot') | list %}
-    {% set site_resources = artifacts | selectattr('type', '==', 'site_resource') | list %}
-    {% set request_bodies = artifacts | selectattr('type', '==', 'request_body') | list %}
     {% if screenshots %}
       <h4 class="muted" style="margin:0.5rem 0 0.25rem">Screenshots <span>({{ screenshots|length }})</span></h4>
       <div class="screenshot-gallery">
@@ -127,11 +124,12 @@
     {% if site_resources %}
       <h4 class="muted" style="margin:1rem 0 0.25rem">Site resources <span>({{ site_resources|length }})</span></h4>
       <table>
-        <thead><tr><th>Type</th><th>URL</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
+        <thead><tr><th>Type</th><th>Captured</th><th>URL</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
         <tbody>
         {% for a in site_resources %}
           <tr>
             <td>{{ a.type }}</td>
+            <td class="muted mono" style="font-size:0.85em;white-space:nowrap">{{ a.captured_at|datetime if a.captured_at else '' }}</td>
             <td class="mono" style="word-break:break-all;max-width:420px">
               {% if a.source_url %}
                 {{ a.source_url }}
@@ -150,11 +148,12 @@
     {% if request_bodies %}
       <h4 class="muted" style="margin:1rem 0 0.25rem">Request bodies <span>({{ request_bodies|length }})</span></h4>
       <table>
-        <thead><tr><th>Type</th><th>URL</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
+        <thead><tr><th>Type</th><th>Captured</th><th>URL</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
         <tbody>
         {% for a in request_bodies %}
           <tr>
             <td>{{ a.type }}</td>
+            <td class="muted mono" style="font-size:0.85em;white-space:nowrap">{{ a.captured_at|datetime if a.captured_at else '' }}</td>
             <td class="mono" style="word-break:break-all;max-width:420px">
               {% if a.source_url %}
                 {{ a.source_url }}
@@ -172,6 +171,23 @@
     {% endif %}
   {% else %}
     <p class="muted">No artifacts yet.</p>
+  {% endif %}
+</section>
+
+<section>
+  <h3>State timeline</h3>
+  {% if transitions %}
+    <ol class="timeline">
+      {% for t in transitions %}
+        <li>
+          <span class="status-badge {{ t.to_state }}">{{ t.to_state }}</span>
+          <div class="muted mono" style="font-size:0.8em;margin-top:0.25rem">{{ t.timestamp|datetime }}</div>
+          {% if t.detail %}<div class="muted mono" style="font-size:0.8em">{{ t.detail }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="muted">No transitions recorded yet.</p>
   {% endif %}
 </section>
 
