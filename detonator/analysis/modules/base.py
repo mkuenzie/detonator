@@ -157,7 +157,7 @@ def _load_resources(artifact_dir: str, artifacts: list[dict]) -> list[ResourceCo
     url_to_mime = _build_url_mime_map(artifact_dir)
     resources: list[ResourceContent] = []
     for a in artifacts:
-        if a.get("artifact_type") != "site_resource":
+        if a.get("type") != "site_resource":
             continue
         src_url = a.get("source_url") or ""
         mime = url_to_mime.get(src_url, "")
