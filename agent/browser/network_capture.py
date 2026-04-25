@@ -1,14 +1,29 @@
 """Authoritative network body capture layer for detonation runs.
 
-Playwright's HAR writer silently drops bodies for main-frame document
-responses and some POST responses.  This layer captures every fetchable
-response (and outgoing request) body independently, content-addressed to
-``bodies/<sha>.<ext>``, and writes a JSONL manifest that downstream
-consumers merge with the HAR to fill the gaps.
+Captures every fetchable response and outgoing request body to
+``bodies/<sha256>.<ext>`` and writes a JSONL manifest (one JSON object
+per capture event) to ``bodies/manifest.jsonl``. The manifest is the
+authoritative record of what was captured; the host's ingestion pipeline
+reads it to attach URL / method / direction / outcome metadata to each
+body file.
 
-The manifest is append-only JSONL (one JSON object per capture event),
-written per response so a mid-run crash leaves everything up to the last
-complete line intact.
+Two sinks feed this module:
+- ``_do_capture_request`` pulls request ``post_data_buffer`` synchronously
+  off Playwright's ``context.on("request")`` event.
+- ``CDPResponseTap`` (see ``cdp_response_tap.py``) pulls response bodies
+  via ``Network.getResponseBody`` inside the ``loadingFinished`` handler,
+  which is the only window where Chromium guarantees the body is still
+  resident. The tap calls ``record_response`` / ``record_failure`` on
+  this module.
+
+The manifest is append-only — one JSON object per line, flushed per
+event — so a mid-run crash leaves everything up to the last complete
+line intact.
+
+Note: Playwright's own HAR writer runs in parallel with ``record_har_content="attach"``
+enabled, producing a second copy of many bodies under SHA-1-named files.
+The host ingestion code currently unions both sources, which double-counts.
+Single-source-of-truth consolidation is tracked in SPEC.md.
 """
 
 from __future__ import annotations

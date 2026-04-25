@@ -3,18 +3,19 @@
 Drives a single detonation end-to-end:
 
     pending
-      → provisioning   (revert VM to clean snapshot)
-      → preflight      (verify egress / isolation — stubbed in phase 2)
-      → detonating     (start VM, wait for agent, trigger detonation)
+      → provisioning   (revert VM to clean snapshot, start VM)
+      → preflight      (activate egress provider, verify public IP)
+      → detonating     (wait for agent health, trigger detonation)
       → [interactive]  (paused for analyst takeover, awaiting /resume)
       → collecting     (download artifacts from agent, stop VM)
-      → enriching      (stubbed in phase 2 — real work lands in phase 4)
-      → filtering      (stubbed in phase 2 — real work lands in phase 5)
+      → enriching      (run enrichment pipeline)
+      → filtering      (extract navigation scope, classify noise, match techniques)
       → complete | error
 
-Each stage logs a ``StateTransition`` with a timestamp + detail. Errors at
-any stage move the run to ``error`` with whatever artifacts have already
-been captured preserved on disk.
+Each stage logs a ``StateTransition`` with timestamp + detail. On error at
+any stage the run moves to ``error``, egress is torn down, the VM is
+force-stopped, and a partial ``manifest.json`` is written so whatever
+was already captured is preserved on disk and indexed in the DB.
 """
 
 from __future__ import annotations

@@ -104,9 +104,9 @@ class AnalysisModuleConfig(BaseModel):
 class AnalysisConfig(BaseModel):
     """Analysis pipeline configuration."""
 
-    modules: list[str] = ["builtin", "sigma"]
+    modules: list[str] = ["sigma"]
     # Directories scanned for Sigma YAML rules. Paths relative to CWD or absolute.
-    rules_dirs: list[str] = ["detonator/analysis/rules/builtin"]
+    rules_dirs: list[str] = ["detonator/analysis/rules"]
 
 
 class DetonatorConfig(BaseModel):

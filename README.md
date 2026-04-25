@@ -1,30 +1,34 @@
 # Detonator — Host Orchestrator Setup
 
-The host orchestrator receives detonation requests, manages the sandbox VM lifecycle via Proxmox, drives the in-VM agent, collects and stores artifacts, and exposes a REST API for interacting with runs, campaigns, and observables.
+The host orchestrator receives detonation requests, manages the sandbox VM lifecycle via Proxmox, drives the in-VM agent, collects and stores artifacts, enriches them, and exposes a REST + web UI for interacting with runs, campaigns, and observables.
 
-This guide covers setting up the orchestrator on the Linux host that has Proxmox access and controls the detonation network.
+This guide covers setting up the orchestrator on the Linux host that has Proxmox access and controls the detonation network. For internal architecture and design principles, see [CLAUDE.md](CLAUDE.md). For phase status, see [SPEC.md](SPEC.md).
 
 ## Host Requirements
 
-- **OS**: Linux (the orchestrator makes direct use of the host network stack for isolation in Phase 3; other distros work for Phases 0–2)
+- **OS**: Linux (the orchestrator owns the sandbox network stack — bridge, nftables, sysctls)
 - **Python**: 3.11 or later, 64-bit
 - **Proxmox VE**: accessible from the host, with API token credentials
-- **Network bridge**: an isolated bridge (e.g. `vmbr1`) in Proxmox hosting the sandbox VM's NIC — see [Network Setup](#network-setup) below
+- **Sandbox bridge**: an isolated L2 bridge (e.g. `vmbr1`) connecting the orchestrator's sandbox NIC to the agent VM's NIC — see [Network Setup](#network-setup)
 
 ## Installation
-
-Clone or copy the repository to the host, then create a virtualenv and install:
 
 ```bash
 cd /opt/detonator          # or wherever you placed the repo
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[proxmox,enrichment,ui]"
+pip install -e ".[proxmox,enrichment,analysis,ui]"
 ```
 
-The `proxmox` extra adds `proxmoxer` (Proxmox API client). The `enrichment` extra adds `dnspython`, `cryptography`, `asyncwhois`, and `mmh3`. The `ui` extra adds `jinja2` and `python-multipart` — required to serve the `/ui/` web interface; omit it for headless deployments.
+Extras:
+- `proxmox` — `proxmoxer` (Proxmox API client)
+- `enrichment` — `dnspython`, `cryptography`, `asyncwhois`, `mmh3`
+- `analysis` — `pyyaml` (Sigma rule evaluation)
+- `ui` — `jinja2`, `python-multipart` (required to serve `/ui/`)
+- `agent` — the in-VM agent's runtime deps (install on the guest image, not the orchestrator)
+- `dev` — pytest + friends
 
-Verify the install:
+Verify:
 
 ```bash
 python -c "from detonator.config import load_config; print('ok')"
@@ -32,129 +36,117 @@ python -c "from detonator.config import load_config; print('ok')"
 
 ## Configuration
 
-Copy the example config and edit it:
-
 ```bash
 cp config.example.toml config.toml
 $EDITOR config.toml
 ```
 
-### `config.toml` reference
+### Key sections
 
 ```toml
-log_level = "INFO"           # DEBUG, INFO, WARNING, ERROR
-enrichment_modules = ["whois", "dns", "tls", "favicon"]
-
+log_level = "INFO"
 
 [vm_provider]
 type = "proxmox"
 
 [vm_provider.settings]
-host        = "192.168.1.10"       # Proxmox host IP or hostname
-port        = 8006                 # Proxmox API port (default 8006)
-user        = "root@pam"           # API token owner
-token_name  = "detonator"          # Token ID (see Proxmox token setup below)
+host        = "192.168.1.10"
+port        = 8006
+user        = "root@pam"
+token_name  = "detonator"
 token_value = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-verify_ssl  = false                # Set true if Proxmox has a valid cert
-node        = "pve"                # Proxmox node name
+verify_ssl  = false
+node        = "pve"
 
 [storage]
-data_dir = "data"               # Artifacts land here: data/runs/{run-uuid}/
-db_path  = "data/detonator.db" # SQLite database
+data_dir = "data"
+db_path  = "data/detonator.db"
 
-# One or more named agents. A run picks an agent by name (or the first one
-# is used by default). Each agent binds a VM + snapshot + the in-VM agent port.
+# One or more named agents. Runs pick by name, or fall back to the first entry.
 [[agents]]
 name               = "win11-sandbox"
 vm_id              = "100"
 snapshot           = "clean"
-port               = 8000   # The port the in-VM agent listens on
-health_timeout_sec = 60     # How long to wait for the agent to become healthy after VM start
-health_poll_sec    = 2      # Polling interval during health wait
-
-# Declare additional agents by repeating the [[agents]] block:
-# [[agents]]
-# name     = "win10-sandbox"
-# vm_id    = "101"
-# snapshot = "clean"
-# port     = 8000
+port               = 8000
+health_timeout_sec = 60
+health_poll_sec    = 2
+# Optional inline stealth profile:
+# stealth = { enabled = true, locale = "en-US", timezone_id = "America/Los_Angeles", viewport_width = 1920, viewport_height = 1080 }
 
 [timeouts]
-provision_sec = 120   # VM revert + start
-preflight_sec = 30    # Pre-flight checks (stub in Phase 2; real work in Phase 3)
-detonate_sec  = 120   # Browser detonation timeout; overridden per-run by timeout_sec
-collect_sec   = 60    # Artifact download from the agent
-enrich_sec    = 120   # Enrichment pipeline (stub in Phase 2; real work in Phase 4)
+provision_sec = 120
+preflight_sec = 30
+detonate_sec  = 120
+collect_sec   = 60
+enrich_sec    = 120
+filter_sec    = 30
 
-# Egress entries define named routing paths for detonation traffic.
-# Phase 3 will automate nftables setup for each; for now these are
-# read by the API at GET /config/egress but not enforced in the network.
+# Orchestrator-local egress. The orchestrator is the L3 gateway — Proxmox just
+# provides the L2 bridge. See docs/tether-setup.md for the USB-tether variant.
 [egress.direct]
 type = "direct"
 
 [egress.direct.settings]
-bridge  = "vmbr1"
-gateway = "192.168.1.1"
+uplink_interface = "ens18"             # NIC with internet access
+sandbox_cidr     = "192.168.100.0/24"  # Sandbox subnet (orchestrator's sandbox NIC + agent VM)
+gateway          = "192.168.0.1"       # LAN gateway
+lan_cidr         = "192.168.1.0/24"    # LAN subnet blocked from the sandbox
 
-# Optional: VPN and tether entries follow the same pattern.
-# See config.example.toml for examples.
-
-# HAR chain filter — controls which requests are written to har_chain.json.
-# noise_domains supplements (does not replace) the built-in tracker list.
+# Noise filter supplements the built-in tracker list.
 [filter]
 noise_domains = []
 noise_resource_types = []
 
+# Analysis: Sigma-style YAML rulepacks. Add your own rule directories.
+[analysis]
+modules    = ["sigma"]
+rules_dirs = ["detonator/analysis/rules"]
+
+# Enrichment plugin modules. Core enrichers (navigations, dom) always run.
+[enrichment]
+modules = ["whois", "dns", "tls", "favicon"]
 ```
+
+See [config.example.toml](config.example.toml) for the full annotated template including tether egress and stealth overrides.
 
 ## Proxmox API Token Setup
 
-The orchestrator authenticates to Proxmox with an API token — not a password. Create one in the Proxmox web UI:
+The orchestrator authenticates to Proxmox with an API token — not a password.
 
 1. **Datacenter → Permissions → API Tokens → Add**
    - User: `root@pam` (or a dedicated user)
    - Token ID: `detonator`
    - Uncheck **Privilege Separation** unless you want to scope permissions manually
 2. Copy the token value shown at creation — it is only displayed once.
-3. If using privilege separation, grant the token permissions on the node, storage, and VM:
-   - Datacenter → Permissions → Add → API Token Permission
-   - Path: `/` (or narrow to `/nodes/pve`, `/vms/100`)
-   - Role: `PVEVMAdmin` (covers revert, start, stop, snapshot, QEMU agent)
-
-Put the token ID and value in `config.toml` under `[vm_provider.settings]`.
+3. If using privilege separation, grant `PVEVMAdmin` on `/nodes/<node>` or narrower.
 
 ## Network Setup
 
-The sandbox VM needs an isolated bridge — traffic from that bridge must not reach the host LAN uncontrolled.
+The sandbox VM needs an isolated L2 bridge to the orchestrator. The orchestrator applies nftables rules on run start (MASQUERADE out the uplink, LAN-drop from the sandbox, deactivate cleanly in `finally`).
 
-**Minimal setup (direct egress, manual routing):**
-
-In the Proxmox web UI or `/etc/network/interfaces` on the Proxmox host:
+**Proxmox side** (`/etc/network/interfaces` on the Proxmox host):
 
 ```
 auto vmbr1
-iface vmbr1 inet static
-    address 192.168.100.1/24
+iface vmbr1 inet manual
     bridge-ports none
     bridge-stp off
     bridge-fd 0
-    post-up echo 1 > /proc/sys/net/ipv4/ip_forward
-    post-up iptables -t nat -A POSTROUTING -s 192.168.100.0/24 -o <wan-interface> -j MASQUERADE
-    post-down iptables -t nat -D POSTROUTING -s 192.168.100.0/24 -o <wan-interface> -j MASQUERADE
 ```
 
-Assign the VM's NIC to `vmbr1`. The VM gets an IP on `192.168.100.0/24`; the orchestrator reaches it from the host at that IP. The agent API port (8000) is only reachable on this bridge — it is not exposed to the host LAN.
+Assign the sandbox VM's NIC to `vmbr1`. Assign the orchestrator VM a second NIC on the same `vmbr1` — that NIC (`ens19` by convention, `sandbox_cidr` subnet) is the sandbox-side interface the `DirectEgressProvider` masquerades through.
 
-> **Phase 3 note:** Automated nftables-based isolation (whitelisting the egress path, blocking LAN access, tearing down rules post-run) is not yet implemented. The above is a manual baseline that is sufficient for Phases 0–2.
+The orchestrator's activation code configures `net.ipv4.ip_forward`, loads the nftables table atomically, and verifies egress via ipify before the agent is contacted. See [docs/tether-setup.md](docs/tether-setup.md) for USB tether variant.
 
 ## Running the Orchestrator
 
 ```bash
 source .venv/bin/activate
 python -m detonator.orchestrator.api config.toml
+# Optional: --json-logs for structured JSON logging
 ```
 
-The API listens on `0.0.0.0:8080` by default. Confirm it is running:
+Listens on `0.0.0.0:8080` by default.
 
 ```bash
 curl http://localhost:8080/health
@@ -165,35 +157,33 @@ curl http://localhost:8080/health
 
 With the `ui` extra installed, the orchestrator serves a browser UI at `/ui/`:
 
-- `/ui/` — dashboard (VM provider + agent status, recent runs, quick-submit form)
-- `/ui/config` — VM provider details, configured agents, egress options
-- `/ui/runs` — filterable run list with live status polling
-- `/ui/runs/{id}` — run detail with state timeline, artifacts, enrichment, techniques, observables
+- `/ui/` — dashboard: VM provider + agent status, recent runs, quick-submit form
+- `/ui/config` — VM provider details, configured agents, egress options, enrichment module + exclusion matrix editor
+- `/ui/runs` — filterable run list with live status polling (status / domain / date range)
+- `/ui/runs/{id}` — run detail: state timeline, artifacts table, enrichment summary, observables, technique matches, chain stats; interactive runs expose a console URL + resume button
 
-The UI is a thin server-rendered layer over the existing JSON API (Jinja2 + HTMX, no JS build step). It polls active runs every 2s for live state updates.
+Jinja2 + HTMX (vendored, no build step). Active runs poll for state updates every 2s.
 
 ## Submitting a Run
 
 ```bash
 curl -s -X POST http://localhost:8080/runs \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com","agent":"win11-sandbox","timeout_sec":120,"interactive":false}' \
+  -d '{"url":"https://example.com","agent":"win11-sandbox","egress":"direct","timeout_sec":120,"interactive":false}' \
   | python3 -m json.tool
 ```
 
-The `agent` field is optional — the first configured agent is used if omitted. Use it when multiple agents are declared.
+`agent` is optional (first configured agent wins). `egress` selects a named egress block (`direct`, `tether`, etc.). Response:
 
-Response:
 ```json
 {"run_id": "3f8a1d2c-ab44-4e7a-b901-2f3c91e4560d", "state": "pending"}
 ```
 
 ### Interactive mode
 
-Set `"interactive": true` to pause the browser after navigation. The run enters the `interactive` state and waits for a resume signal. Use this to manually inspect the page or interact with it via VNC before artifact collection.
+`"interactive": true` pauses the browser after navigation. The run enters `interactive` and waits for a resume signal — use the VNC/SPICE console exposed in the UI or fetch `console_url` from `GET /runs/{id}` to inspect manually.
 
 ```bash
-# Resume an interactive run
 curl -X POST http://localhost:8080/runs/<run-id>/resume
 ```
 
@@ -201,65 +191,53 @@ curl -X POST http://localhost:8080/runs/<run-id>/resume
 
 `pending → provisioning → preflight → detonating → [interactive] → collecting → enriching → filtering → complete | error`
 
-Every transition is persisted with a timestamp. Partial artifacts are preserved on error.
+Every transition is persisted with a timestamp. Partial artifacts + a partial `manifest.json` are preserved on error.
 
 ## Checking Run Status
 
 ```bash
 curl -s http://localhost:8080/runs/<run-id> | python3 -m json.tool
-```
-
-The response includes the run record and a list of all collected artifacts from the `artifacts` table.
-
-```bash
-# List recent runs
 curl "http://localhost:8080/runs?limit=10"
-
-# Filter by status
-curl "http://localhost:8080/runs?status=complete"
+curl "http://localhost:8080/runs?status=complete&domain=example.com"
 ```
 
 ## Downloading Artifacts
 
-### Individual file
-
 ```bash
+# Individual file (path may include sub-directories like screenshots/)
 curl -O http://localhost:8080/runs/<run-id>/artifacts/har_full.har
 curl -O http://localhost:8080/runs/<run-id>/artifacts/dom.html
-curl -O "http://localhost:8080/runs/<run-id>/artifacts/screenshots/screenshot_1744567890.png"
-```
+curl -O http://localhost:8080/runs/<run-id>/artifacts/navigations.json
 
-### Full run as a zip
-
-Downloads all artifacts as a zip archive. The domain name is used as the root directory inside the archive, preserving the full hierarchy:
-
-```bash
+# Full run as a zip (root dir is the seed domain for easy unpacking)
 curl -O http://localhost:8080/runs/<run-id>/artifacts.zip
-# Saves: example.com_3f8a1d2c.zip
-# Extracts to: example.com/har_full.har
-#              example.com/dom.html
-#              example.com/console.json
-#              example.com/screenshots/screenshot_*.png
-#              example.com/meta.json
 ```
 
 ## Data Layout
 
 ```
 data/
-  detonator.db                  ← SQLite (runs, artifacts, campaigns, observables)
+  detonator.db                        ← SQLite (runs, artifacts, campaigns, observables, techniques, ...)
+  blobs/
+    {sha256-prefix}/{sha256-rest}     ← Content-addressed blob store (deduped across runs)
   runs/
     {run-uuid}/
-      har_full.har              ← Full Playwright HAR
-      dom.html                  ← document.documentElement.outerHTML
-      console.json              ← Browser console + page errors
-      meta.json                 ← Serialized RunRecord (config, state, transitions)
+      har_full.har                    ← Full Playwright HAR
+      har_navigation.json             ← HAR filtered to navigation scope (in-scope entries)
+      filter_result.json              ← Scope / noise classification per URL
+      navigations.json                ← Top-level navigation timeline (main + sub frames)
+      dom.html                        ← document.documentElement.outerHTML at end of detonation
+      console.json                    ← Browser console + page errors
+      meta.json                       ← Serialized RunRecord (config, state, transitions)
+      manifest.json                   ← Consolidated run rollup (config + artifacts + enrichment + techniques)
       screenshots/
-        screenshot_{epoch}.png  ← Periodic + final screenshots
-      enrichment/               ← Enrichment outputs (Phase 4)
+        screenshot_{epoch}.png        ← Periodic + final screenshots
+      bodies/
+        manifest.jsonl                ← JSONL: one entry per captured request/response body
+        {sha256}.{ext}                ← Content-addressed body files (symlinked into blobs/)
 ```
 
-The `data/` directory is created on startup relative to the working directory. Set `data_dir` in `config.toml` to use an absolute path.
+All files under `runs/{run-uuid}/` that are content-addressed are symlinks into `blobs/`. The `data/` directory is created on startup; set `storage.data_dir` in `config.toml` to use an absolute path.
 
 ## API Reference
 
@@ -268,10 +246,10 @@ The `data/` directory is created on startup relative to the working directory. S
 | Endpoint | Method | Description |
 |---|---|---|
 | `/runs` | POST | Submit a detonation run |
-| `/runs` | GET | List runs (`?status=`, `?limit=`, `?offset=`) |
-| `/runs/{id}` | GET | Run detail + artifact manifest |
-| `/runs/{id}/artifacts/{name:path}` | GET | Download one artifact |
-| `/runs/{id}/artifacts.zip` | GET | Download all artifacts as a zip |
+| `/runs` | GET | List runs (`status`, `domain`, `date_from`, `date_to`, `limit`, `offset`) |
+| `/runs/{id}` | GET | Run detail + artifact manifest (and `console_url` when interactive) |
+| `/runs/{id}/artifacts/{name:path}` | GET | Download one artifact (path-traversal guarded) |
+| `/runs/{id}/artifacts.zip` | GET | Download all artifacts as a zip (seed domain is the archive root) |
 | `/runs/{id}/resume` | POST | Resume an interactive run |
 | `/runs/{id}` | DELETE | Delete run record + artifacts (blocked while active) |
 
@@ -290,10 +268,18 @@ The `data/` directory is created on startup relative to the working directory. S
 | Endpoint | Method | Description |
 |---|---|---|
 | `/observables` | GET | Search by type + value pattern |
-| `/observables/{id}` | GET | Detail with linked runs |
-| `/observables/{id}/graph` | GET | Observable neighborhood (links + campaigns) |
+| `/observables/{id}` | GET | Detail with linked runs, outgoing/incoming links, campaigns |
+| `/observables/{id}/graph` | GET | Observable neighborhood |
 | `/techniques` | GET | List all techniques |
 | `/techniques/{id}/matches` | GET | Runs that matched this technique |
+| `/domain/{domain}/runs` | GET | Cross-run lookup: all runs that touched `{domain}` via seed URL or enrichment |
+
+### Graph (cytoscape-compatible)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/graph/search` | GET | Search across observables / techniques / campaigns (`?q=...&limit=...`) |
+| `/graph/nodes/{node_type}/{node_id}/neighbors` | GET | `{nodes, edges}` suitable for direct cytoscape ingestion |
 
 ### Enrichment exclusions
 
@@ -303,31 +289,16 @@ The `data/` directory is created on startup relative to the working directory. S
 | `/config/enrichment/exclusions` | POST | Add exclusion `{"enricher_name": "dns", "host_pattern": "cdn.example.com"}` |
 | `/config/enrichment/exclusions` | DELETE | Remove exclusion (same body shape as POST) |
 
-Exclusions are stored in SQLite and take effect on the next run without an orchestrator restart. The same data powers the matrix editor at `/ui/config`.
-
-**How matching works:** a host is excluded if it equals the pattern exactly *or* if it ends with `.<pattern>` — so `googleapis.com` suppresses `fonts.googleapis.com` too. Matching is case-insensitive. The logic lives in `Enricher._is_host_excluded()`.
-
-**Bulk editing via API:**
-```bash
-# Add a new exclusion for the dns enricher
-curl -X POST http://localhost:8080/config/enrichment/exclusions \
-  -H "Content-Type: application/json" \
-  -d '{"enricher_name":"dns","host_pattern":"malicious-cdn.example"}'
-
-# Remove it
-curl -X DELETE http://localhost:8080/config/enrichment/exclusions \
-  -H "Content-Type: application/json" \
-  -d '{"enricher_name":"dns","host_pattern":"malicious-cdn.example"}'
-```
-
-**Default exclusions** (seeded on first startup from `database.py`): well-known CDN and cloud hosts (cloudflare.com, googleapis.com, amazonaws.com, etc.) where the registrant is always the provider rather than the adversary. Edit via `/ui/config` or the API — changes survive restarts.
+Exclusions are stored in SQLite and take effect on the next run without a restart. Matching: a host is excluded if it equals the pattern exactly *or* ends with `.<pattern>` — so `googleapis.com` suppresses `fonts.googleapis.com` too. Case-insensitive. Logic lives in `Enricher._is_host_excluded()`. Default exclusions (CDNs, cloud hosts) are seeded on first startup from `database.py`.
 
 ### System
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/health` | GET | Orchestrator health + active-run count |
-| `/config/agents` | GET | Configured agents + current VM state for each |
+| `/config/agents` | GET | Configured agents + current VM state + active run IDs |
 | `/config/egress` | GET | Configured egress options |
 | `/config/vms` | GET | VM list from the provider (503 if Proxmox is unreachable) |
+| `/docs` | GET | Swagger UI (auto-generated) |
+| `/redoc` | GET | ReDoc (auto-generated) |
 | `/ui/` | GET | Web UI (requires `ui` extra) |

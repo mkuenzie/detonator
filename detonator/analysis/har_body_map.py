@@ -208,7 +208,3 @@ def _load_legacy_json(path: Path) -> dict[str, HarBodyRef]:
             captured_at=entry.get("captured_at") or None,
         )
     return mapping
-
-
-# Legacy alias — callers should migrate to load_capture_manifest.
-load_extra_bodies = load_capture_manifest
