@@ -86,14 +86,60 @@
     {% set primary_artifacts = artifacts | rejectattr('type', 'in', network_types) | rejectattr('type', '==', 'screenshot') | list %}
     {% if screenshots %}
       <h4 class="muted" style="margin:0.5rem 0 0.25rem">Screenshots <span>({{ screenshots|length }})</span></h4>
-      <div class="screenshot-gallery">
+      <div class="screenshot-gallery" id="screenshot-gallery">
         {% for a in screenshots %}
-          <a href="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}" target="_blank" rel="noopener">
+          <div class="screenshot-thumb" data-src="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}" data-label="{{ a.path.split('/')[-1] if '/' in a.path else a.path }}" style="cursor:pointer;">
             <img src="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}" alt="{{ a.path.split('/')[-1] if '/' in a.path else a.path }}" loading="lazy">
             <div class="screenshot-label">{{ a.path.split('/')[-1] if '/' in a.path else a.path }}</div>
-          </a>
+          </div>
         {% endfor %}
       </div>
+
+      <!-- Lightbox -->
+      <div class="lightbox-overlay" id="lightbox" role="dialog" aria-modal="true">
+        <span class="lightbox-close" id="lb-close" title="Close (Esc)">&times;</span>
+        <span class="lightbox-nav lightbox-prev" id="lb-prev">&#8249;</span>
+        <img id="lb-img" src="" alt="">
+        <span class="lightbox-nav lightbox-next" id="lb-next">&#8250;</span>
+        <div class="lightbox-caption" id="lb-caption"></div>
+      </div>
+      <script>
+      (function(){
+        const gallery = document.getElementById('screenshot-gallery');
+        if (!gallery) return;
+        const thumbs = Array.from(gallery.querySelectorAll('.screenshot-thumb'));
+        if (!thumbs.length) return;
+        const overlay = document.getElementById('lightbox');
+        const img = document.getElementById('lb-img');
+        const caption = document.getElementById('lb-caption');
+        let current = 0;
+
+        function show(idx) {
+          current = (idx + thumbs.length) % thumbs.length;
+          const t = thumbs[current];
+          img.src = t.dataset.src;
+          img.alt = t.dataset.label;
+          caption.textContent = t.dataset.label;
+          overlay.classList.add('active');
+          document.body.style.overflow = 'hidden';
+        }
+        function close() {
+          overlay.classList.remove('active');
+          document.body.style.overflow = '';
+        }
+        thumbs.forEach((t, i) => t.addEventListener('click', () => show(i)));
+        document.getElementById('lb-close').addEventListener('click', close);
+        document.getElementById('lb-prev').addEventListener('click', () => show(current - 1));
+        document.getElementById('lb-next').addEventListener('click', () => show(current + 1));
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+        document.addEventListener('keydown', e => {
+          if (!overlay.classList.contains('active')) return;
+          if (e.key === 'Escape') close();
+          else if (e.key === 'ArrowLeft') show(current - 1);
+          else if (e.key === 'ArrowRight') show(current + 1);
+        });
+      })();
+      </script>
     {% endif %}
     {% if primary_artifacts %}
       <h4 class="muted" style="margin:0.5rem 0 0.25rem">Capture artifacts</h4>

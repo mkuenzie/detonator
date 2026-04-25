@@ -211,7 +211,7 @@ details.json pre {
   gap: 0.75rem;
   margin: 0.5rem 0 1rem;
 }
-.screenshot-gallery a {
+.screenshot-gallery .screenshot-thumb {
   display: block;
   border: 1px solid var(--pico-muted-border-color);
   border-radius: 4px;
@@ -219,7 +219,7 @@ details.json pre {
   flex-shrink: 0;
   transition: border-color 0.15s;
 }
-.screenshot-gallery a:hover {
+.screenshot-gallery .screenshot-thumb:hover {
   border-color: var(--pico-primary);
 }
 .screenshot-gallery img {
@@ -239,6 +239,62 @@ details.json pre {
   text-overflow: ellipsis;
   max-width: 200px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Lightbox overlay */
+.lightbox-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0,0,0,0.88);
+  align-items: center;
+  justify-content: center;
+}
+.lightbox-overlay.active { display: flex; }
+.lightbox-overlay img {
+  max-width: 92vw;
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.6);
+}
+.lightbox-close {
+  position: fixed;
+  top: 1rem;
+  right: 1.25rem;
+  font-size: 2rem;
+  line-height: 1;
+  color: #fff;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.8;
+}
+.lightbox-close:hover { opacity: 1; }
+.lightbox-nav {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 2.5rem;
+  line-height: 1;
+  color: #fff;
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.7;
+  padding: 0 0.75rem;
+}
+.lightbox-nav:hover { opacity: 1; }
+.lightbox-prev { left: 0.5rem; }
+.lightbox-next { right: 0.5rem; }
+.lightbox-caption {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #ccc;
+  font-size: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: nowrap;
 }
 
 /* Graph page */
