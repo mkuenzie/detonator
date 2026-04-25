@@ -1,11 +1,10 @@
-"""Authoritative network body capture layer for detonation runs.
+"""Network body capture layer for detonation runs.
 
 Captures every fetchable response and outgoing request body to
-``bodies/<sha256>.<ext>`` and writes a JSONL manifest (one JSON object
-per capture event) to ``bodies/manifest.jsonl``. The manifest is the
-authoritative record of what was captured; the host's ingestion pipeline
-reads it to attach URL / method / direction / outcome metadata to each
-body file.
+``bodies/<sha1>.<ext>`` and writes a JSONL manifest (one JSON object
+per capture event) to ``bodies/manifest.jsonl``. The manifest carries
+URL / method / direction / outcome metadata that the host's ingestion
+pipeline attaches to each body file.
 
 Two sinks feed this module:
 - ``_do_capture_request`` pulls request ``post_data_buffer`` synchronously
@@ -20,10 +19,38 @@ The manifest is append-only — one JSON object per line, flushed per
 event — so a mid-run crash leaves everything up to the last complete
 line intact.
 
-Note: Playwright's own HAR writer runs in parallel with ``record_har_content="attach"``
-enabled, producing a second copy of many bodies under SHA-1-named files.
-The host ingestion code currently unions both sources, which double-counts.
-Single-source-of-truth consolidation is tracked in SPEC.md.
+# Why SHA-1 (not SHA-256) for the body filenames
+
+Playwright's HAR writer (``record_har_content="attach"``) runs in parallel
+and writes its own copy of bodies, naming them by SHA-1. By using SHA-1
+here too, both capture paths produce the *same* basename for the same
+body bytes — so they share the file on disk, the host's basename-keyed
+merge in ``Runner._collect_artifacts`` strict-unions them without
+duplication, and we get exactly one artifact row per unique body.
+
+SHA-1's cryptographic weakness is irrelevant: we're content-addressing
+network captures inside a sandbox we control, not signing them. Git uses
+SHA-1 for the same job. The host's CAS still uses SHA-256 internally
+(computed at adoption time) — that's a separate concern.
+
+# Why this layer exists at all (it isn't redundant with HAR)
+
+Empirically, both capture paths are load-bearing:
+- HAR attach has a documented race where Chromium disposes main-frame
+  document bodies before Playwright's writer reads them, dropping the
+  body silently. The CDP tap closes this race by reading inside
+  ``loadingFinished``.
+- Conversely, ``CDPResponseTap``'s per-page session does not see Network
+  events from cross-origin iframe targets (Chromium site isolation puts
+  OOPIFs in a separate renderer with its own CDP target). HAR catches
+  those because Playwright owns the underlying CDP and is wired into
+  every target.
+
+Each path covers the other's gap. There is no single-source-of-truth
+simplification — observed empirically across multiple runs (see
+``scripts/capture_diff.py``). The "duplication" you see between
+paths is the price of complete coverage; SHA-1 alignment is what makes
+that duplication free at the storage and ingest layers.
 """
 
 from __future__ import annotations
@@ -220,7 +247,7 @@ class NetworkCapture:
             size_truncated = self._max_body_bytes
             actual_outcome = "truncated"
 
-        sha = hashlib.sha256(body).hexdigest()
+        sha = hashlib.sha1(body).hexdigest()
         basename = f"{sha}{_ext_for_mime(mime_type)}"
 
         if sha not in self._saved_hashes:
@@ -313,7 +340,7 @@ class NetworkCapture:
             size_truncated = self._max_body_bytes
             outcome = "truncated"
 
-        sha = hashlib.sha256(body).hexdigest()
+        sha = hashlib.sha1(body).hexdigest()
         basename = f"{sha}{_ext_for_mime(mime_type)}"
 
         if sha not in self._saved_hashes:

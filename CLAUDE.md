@@ -46,14 +46,23 @@ In-VM Agent (FastAPI + Playwright Chromium, headed)
 
 ## Capture & ingestion (important detail)
 
-The agent runs **four** capture subsystems in parallel, all landing in `bodies/`:
+The agent runs **four** capture subsystems in parallel, all landing in `bodies/<sha1>.<ext>`:
 
-1. **Playwright HAR attach mode** writes `har_full.har` with per-entry `_file` refs; Playwright names body files by **SHA-1** of the body.
-2. **`NetworkCapture`** ([agent/browser/network_capture.py](agent/browser/network_capture.py)) handles request bodies via `context.on("request")` and is the sink for the CDP tap; body files are named by **SHA-256**. Writes one JSONL line per capture event to `bodies/manifest.jsonl`.
+1. **Playwright HAR attach mode** writes `har_full.har` with per-entry `_file` refs; Playwright names body files by **SHA-1** of the body (its native scheme).
+2. **`NetworkCapture`** ([agent/browser/network_capture.py](agent/browser/network_capture.py)) handles request bodies via `context.on("request")` and is the sink for the CDP tap. **Also names body files by SHA-1**, deliberately matching Playwright's scheme so both paths share files on disk. Writes one JSONL line per capture event to `bodies/manifest.jsonl`.
 3. **`CDPResponseTap`** ([agent/browser/cdp_response_tap.py](agent/browser/cdp_response_tap.py)) attaches a CDP session per page and pulls response bodies inside `loadingFinished` — closes the disposal race that makes `response.body()` miss main-frame docs on fast-redirecting pages. Feeds into `NetworkCapture` as a sink.
-4. **`RouteDocumentInterceptor`** ([agent/browser/route_document_interceptor.py](agent/browser/route_document_interceptor.py)) catches main-frame document responses via route interception (subresources fall back to the CDP tap).
+4. **`RouteDocumentInterceptor`** ([agent/browser/route_document_interceptor.py](agent/browser/route_document_interceptor.py)) catches main-frame document responses via route interception (subresources fall back to the CDP tap). It exists because an earlier per-page `Fetch.enable` CDP interceptor raced with patchright's own Fetch channel and stalled cross-origin navigations.
 
-Host ingestion in `Runner._collect_artifacts()` unions two body-ref sources **by basename**: `map_body_files(har_full.har)` (SHA-1 keys) + `load_capture_manifest(bodies/manifest.jsonl)` (SHA-256 keys). Because the two naming schemes don't collide, identical bodies captured by both paths currently produce **two artifact rows pointing at the same CAS blob**. This is a known duplication bug; the design direction is to make the agent's capture path the single source of truth and drop Playwright's body attachments. See the "known issues" note in SPEC.md.
+Host ingestion in `Runner._collect_artifacts()` unions two body-ref sources **by basename**: `map_body_files(har_full.har)` + `load_capture_manifest(bodies/manifest.jsonl)`. Because both paths now use SHA-1, the union is a clean strict-set union — same content = same basename = one artifact row.
+
+### Why both paths are required (don't try to "simplify" by deleting one)
+
+Empirically (`scripts/capture_diff.py` across multiple runs) each path covers the other's gap:
+
+- **HAR attach** has a documented race where Chromium disposes main-frame document bodies on fast redirects before Playwright's writer reads them. The CDP tap closes this race by reading inside `loadingFinished`.
+- **The agent stack** misses cross-origin iframe documents because `CDPResponseTap` attaches per-page (`context.new_cdp_session(page)`) and Chromium's site isolation puts OOPIFs in a separate renderer / CDP target the page session never sees. Playwright's HAR writer catches them because it lives in the browser process and is wired into every target.
+
+There's a load-bearing observer effect: the agent stack's own per-request CDP/route latency is what gives Playwright's HAR writer enough time to win its body-read race. Recent runs show `manifest_only ≈ 0` (HAR is a strict superset of agent capture by URL), but two older runs in the corpus show `manifest_only > 0`, proving the gap is real and only suppressed by the capture infrastructure's own presence. **Deleting either path will reintroduce gaps.** The "duplication" is the price of completeness; SHA-1 alignment makes that duplication free at the file and ingestion layers.
 
 ## Three-tier data model
 

@@ -73,8 +73,8 @@ def _read_manifest(bodies_dir: Path) -> list[dict]:
     return lines
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _sha1(data: bytes) -> str:
+    return hashlib.sha1(data).hexdigest()
 
 
 # ── Sink interface (record_response / record_failure) ─────────────────────
@@ -103,7 +103,7 @@ async def test_record_response_writes_body_and_manifest(tmp_path):
     await cap.drain()
     stats = cap.finalize()
 
-    sha = _sha256(body)
+    sha = _sha1(body)
     assert (bodies_dir / f"{sha}.html").read_bytes() == body
 
     manifest = _read_manifest(bodies_dir)
@@ -189,7 +189,7 @@ async def test_record_response_deduplicates(tmp_path):
         )
     await cap.drain()
 
-    sha = _sha256(body)
+    sha = _sha1(body)
     files = list(bodies_dir.glob(f"{sha}.*"))
     assert len(files) == 1
 
@@ -251,7 +251,7 @@ async def test_captures_request_body(tmp_path):
     ctx.fire_request(req)
     await cap.drain()
 
-    sha = _sha256(post_data)
+    sha = _sha1(post_data)
     assert (bodies_dir / f"{sha}.bin").read_bytes() == post_data
 
     manifest = _read_manifest(bodies_dir)
