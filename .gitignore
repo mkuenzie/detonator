@@ -7,3 +7,4 @@ build/
 .pytest_cache/
 data/
 *.db
+config.toml
