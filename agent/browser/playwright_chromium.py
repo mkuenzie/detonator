@@ -149,7 +149,7 @@ class PlaywrightChromiumModule(BrowserModule):
 
                 async def _capture() -> None:
                     try:
-                        await self._page.screenshot(path=str(path))
+                        await self._page.screenshot(path=str(path), full_page=True)
                         screenshot_paths.append(path)
                     except Exception:
                         logger.debug("Load-event screenshot failed (page may be navigating)")
@@ -190,10 +190,6 @@ class PlaywrightChromiumModule(BrowserModule):
 
         await asyncio.gather(*self._screenshot_tasks, return_exceptions=True)
         self._screenshot_tasks = []
-
-        final_screenshot = self._artifact_dir / f"screenshot_{int(time.time())}.png"
-        await self._page.screenshot(path=str(final_screenshot), full_page=True)
-        screenshot_paths.append(final_screenshot)
 
         dom_path = self._artifact_dir / "dom.html"
         dom_content = await self._page.evaluate("document.documentElement.outerHTML")
