@@ -109,6 +109,12 @@ class AnalysisConfig(BaseModel):
     rules_dirs: list[str] = ["detonator/analysis/rules"]
 
 
+class UIConfig(BaseModel):
+    """UI-specific configuration."""
+
+    body_preview_max_bytes: int = 262144  # 256 KiB
+
+
 class DetonatorConfig(BaseModel):
     """Top-level configuration for the detonator host orchestrator."""
 
@@ -122,7 +128,9 @@ class DetonatorConfig(BaseModel):
     enrichment: EnrichmentConfig = EnrichmentConfig()
     filter: FilterConfig = FilterConfig()
     analysis: AnalysisConfig = AnalysisConfig()
+    ui: UIConfig = UIConfig()
     log_level: str = "INFO"
+    log_file: str | None = None
 
     def get_agent(self, name: str) -> AgentInstanceConfig:
         """Look up an agent by name; raises KeyError if not found."""

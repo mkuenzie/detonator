@@ -44,6 +44,7 @@ class ArtifactType(StrEnum):
     ENRICHMENT_TLS = "enrichment_tls"
     ENRICHMENT_FAVICON = "enrichment_favicon"
     MANIFEST = "manifest"
+    WEBSOCKETS = "websockets"
 
 
 class RunConfig(BaseModel):

@@ -1,0 +1,17 @@
+{% if observables %}
+<table>
+  <thead><tr><th>Type</th><th>Value</th><th>Source</th><th>First seen</th></tr></thead>
+  <tbody>
+    {% for o in observables %}
+    <tr>
+      <td><code>{{ o.type }}</code></td>
+      <td class="mono"><a href="/ui/observables/{{ o.id }}">{{ o.value }}</a></td>
+      <td class="muted">{{ o.enricher }}</td>
+      <td class="muted">{{ o.first_seen|datetime }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">No observables extracted for this run.</p>
+{% endif %}

@@ -1,0 +1,71 @@
+<div class="tx-row-detail">
+  <div class="tx-panel">
+    <h5>Request</h5>
+    <div class="kv-list">
+      <div class="kv-row"><span class="kv-key">URL</span><span class="kv-val mono" style="word-break:break-all">{{ tx.url }}</span></div>
+      <div class="kv-row"><span class="kv-key">Method</span><span class="kv-val mono">{{ tx.method }}</span></div>
+      {% if tx.frame_url %}<div class="kv-row"><span class="kv-key">Frame</span><span class="kv-val mono truncate" title="{{ tx.frame_url }}">{{ tx.frame_url }}</span></div>{% endif %}
+      {% if tx.initiator_chain %}
+        <div class="kv-row">
+          <span class="kv-key">Initiator chain</span>
+          <span class="kv-val">
+            {% for parent in tx.initiator_chain %}
+              <span class="mono" style="font-size:0.8em;display:block">{{ loop.index }}. {{ parent }}</span>
+            {% endfor %}
+            <span class="mono" style="font-size:0.8em;display:block;font-weight:600">→ {{ tx.url }}</span>
+          </span>
+        </div>
+      {% elif tx.initiator_url %}
+        <div class="kv-row"><span class="kv-key">Initiator</span><span class="kv-val mono truncate" title="{{ tx.initiator_url }}">{{ tx.initiator_url }}</span></div>
+      {% endif %}
+    </div>
+    {% if tx.request_headers %}
+      <details style="margin-top:0.5rem">
+        <summary class="muted" style="font-size:0.85em">Request headers ({{ tx.request_headers|length }})</summary>
+        <dl class="kv-list" style="margin-top:0.3rem">
+          {% for k, v in tx.request_headers %}
+            <div class="kv-row"><span class="kv-key mono">{{ k }}</span><span class="kv-val mono">{{ v }}</span></div>
+          {% endfor %}
+        </dl>
+      </details>
+    {% endif %}
+  </div>
+
+  <div class="tx-panel">
+    <h5>Response</h5>
+    <div class="kv-list">
+      <div class="kv-row"><span class="kv-key">Status</span><span class="kv-val mono"><span class="tx-status {{ tx.status_class }}">{{ tx.status or '—' }}</span></span></div>
+      <div class="kv-row"><span class="kv-key">MIME</span><span class="kv-val mono">{{ tx.mime_type or '—' }}</span></div>
+      {% if tx.size_response is not none %}<div class="kv-row"><span class="kv-key">Size</span><span class="kv-val">{{ tx.size_response|bytes }}</span></div>{% endif %}
+      {% if tx.server_ip %}<div class="kv-row"><span class="kv-key">Server IP</span><span class="kv-val mono">{{ tx.server_ip }}</span></div>{% endif %}
+      {% if tx.time_ms is not none %}<div class="kv-row"><span class="kv-key">Time</span><span class="kv-val">{{ "%.0f"|format(tx.time_ms) }} ms</span></div>{% endif %}
+    </div>
+    {% if tx.response_headers %}
+      <details style="margin-top:0.5rem">
+        <summary class="muted" style="font-size:0.85em">Response headers ({{ tx.response_headers|length }})</summary>
+        <dl class="kv-list" style="margin-top:0.3rem">
+          {% for k, v in tx.response_headers %}
+            <div class="kv-row"><span class="kv-key mono">{{ k }}</span><span class="kv-val mono">{{ v }}</span></div>
+          {% endfor %}
+        </dl>
+      </details>
+    {% endif %}
+    {% if tx.body_basename %}
+      <div style="margin-top:0.5rem">
+        <a href="/runs/{{ run_id }}/artifacts/bodies/{{ tx.body_basename }}" class="muted" style="font-size:0.85em">Download body</a>
+        {% if tx.is_image %}
+          <div style="margin-top:0.5rem">
+            <img src="/runs/{{ run_id }}/artifacts/bodies/{{ tx.body_basename }}" style="max-width:100%;max-height:400px;border-radius:4px" loading="lazy" alt="Response body">
+          </div>
+        {% elif tx.is_text %}
+          <div id="body-preview-{{ tx.index }}"
+               hx-get="/ui/_partials/runs/{{ run_id }}/bodies/{{ tx.body_basename }}/preview"
+               hx-trigger="revealed"
+               hx-swap="outerHTML">
+            <span class="muted" style="font-size:0.85em">Loading preview…</span>
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+</div>

@@ -1,0 +1,75 @@
+<section>
+  <h3 style="display:flex;align-items:center;gap:1rem">
+    Artifacts <span class="muted">({{ artifacts|length }})</span>
+    <a href="/runs/{{ run.id }}/artifacts.zip" role="button" class="secondary" style="font-size:0.85rem;padding:0.25rem 0.75rem">Download zip</a>
+  </h3>
+  {% if artifacts %}
+    {% set network_types = ['site_resource', 'request_body'] %}
+    {% set primary_artifacts = artifacts | rejectattr('type', 'in', network_types) | rejectattr('type', '==', 'screenshot') | list %}
+    {% if primary_artifacts %}
+      <h4 class="muted" style="margin:0.5rem 0 0.25rem">Capture artifacts</h4>
+      <table>
+        <thead><tr><th>Type</th><th>Name</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
+        <tbody>
+        {% for a in primary_artifacts %}
+          <tr>
+            <td>{{ a.type }}</td>
+            <td class="mono">
+              {% if a.source_url %}{{ a.source_url }}{% else %}{{ a.path.split('/')[-1] if '/' in a.path else a.path }}{% endif %}
+            </td>
+            <td class="muted">{{ a.size|bytes }}</td>
+            <td class="mono muted" title="{{ a.content_hash }}">{{ (a.content_hash or '')[:12] }}{% if a.content_hash %}…{% endif %}</td>
+            <td><a href="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}">download</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    {% if site_resources %}
+      <details style="margin:1rem 0 0">
+        <summary class="muted">Site resources <span>({{ site_resources|length }})</span></summary>
+        <table>
+          <thead><tr><th>Type</th><th>Captured</th><th>URL</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
+          <tbody>
+          {% for a in site_resources %}
+            <tr>
+              <td>{{ a.type }}</td>
+              <td class="muted mono" style="font-size:0.85em;white-space:nowrap">{{ a.captured_at|datetime if a.captured_at else '' }}</td>
+              <td class="mono" style="word-break:break-all;max-width:420px">
+                {% if a.source_url %}{{ a.source_url }}{% else %}{{ a.path.split('/')[-1] if '/' in a.path else a.path }}{% endif %}
+              </td>
+              <td class="muted">{{ a.size|bytes }}</td>
+              <td class="mono muted" title="{{ a.content_hash }}">{{ (a.content_hash or '')[:12] }}{% if a.content_hash %}…{% endif %}</td>
+              <td><a href="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}">download</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
+    {% if request_bodies %}
+      <details style="margin:1rem 0 0">
+        <summary class="muted">Request bodies <span>({{ request_bodies|length }})</span></summary>
+        <table>
+          <thead><tr><th>Type</th><th>Captured</th><th>URL</th><th>Size</th><th>SHA-256</th><th></th></tr></thead>
+          <tbody>
+          {% for a in request_bodies %}
+            <tr>
+              <td>{{ a.type }}</td>
+              <td class="muted mono" style="font-size:0.85em;white-space:nowrap">{{ a.captured_at|datetime if a.captured_at else '' }}</td>
+              <td class="mono" style="word-break:break-all;max-width:420px">
+                {% if a.source_url %}{{ a.source_url }}{% else %}{{ a.path.split('/')[-1] if '/' in a.path else a.path }}{% endif %}
+              </td>
+              <td class="muted">{{ a.size|bytes }}</td>
+              <td class="mono muted" title="{{ a.content_hash }}">{{ (a.content_hash or '')[:12] }}{% if a.content_hash %}…{% endif %}</td>
+              <td><a href="/runs/{{ run.id }}/artifacts/{{ a.rel_path }}">download</a></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    {% endif %}
+  {% else %}
+    <p class="muted">No artifacts yet.</p>
+  {% endif %}
+</section>

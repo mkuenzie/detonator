@@ -1,0 +1,66 @@
+{% if enrichment %}
+<section>
+  <div class="flex-row" style="margin-bottom:1rem">
+    <span class="muted">{{ enrichment.results|length if enrichment.results else 0 }} enricher result{{ 's' if (enrichment.results|length) != 1 else '' }}</span>
+    <span class="muted">{{ observables|length }} observable{{ 's' if observables|length != 1 else '' }}</span>
+  </div>
+
+  {% if enrichment.results %}
+  <div style="overflow-x:auto">
+    <table style="table-layout:fixed;min-width:700px">
+      <colgroup>
+        <col style="width:120px">
+        <col style="width:280px">
+        <col style="width:90px">
+        <col>
+        <col style="width:70px">
+      </colgroup>
+      <thead>
+        <tr style="white-space:nowrap">
+          <th>Enricher</th>
+          <th>Input</th>
+          <th style="text-align:center">Observables</th>
+          <th>Details</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for res in enrichment.results %}
+        <tr>
+          <td><code>{{ res.enricher }}</code></td>
+          <td class="mono" style="overflow-wrap:anywhere;word-break:break-all">{{ res.input_value }}</td>
+          <td style="text-align:center">{{ (res.observables or [])|length }}</td>
+          <td>
+            {% if res.data %}
+              {% for key, val in res.data.items() %}
+                <div><span class="muted">{{ key }}:</span>
+                {% if val is mapping %}
+                  <span style="font-size:0.85em">{{ val | tojson }}</span>
+                {% elif val is iterable and val is not string %}
+                  {{ val | join(', ') }}
+                {% else %}
+                  {{ val }}
+                {% endif %}
+                </div>
+              {% endfor %}
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if res.error %}
+              <span style="color:var(--pico-color-red-550)">{{ res.error }}</span>
+            {% else %}
+              <span style="color:var(--pico-color-green-550)">ok</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+{% else %}
+<p class="muted">No enrichment data for this run.</p>
+{% endif %}

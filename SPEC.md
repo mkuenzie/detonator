@@ -14,7 +14,7 @@ Living document tracking what's built, what's next, and what's deferred. Code is
 | 5 | Navigation scope + noise filter | Complete (renamed from "Chain Extraction") |
 | 5b | Analysis Modularization | Partial — Sigma module live; builtin module was removed |
 | 6 | Manifest & Polish | Complete |
-| 7 | Web UI | Complete — graph view + campaign/observable detail pages deferred |
+| 7 | Web UI | Complete — Network tab + per-transaction view added; graph view + campaign detail deferred |
 
 ---
 
@@ -141,7 +141,7 @@ Enrichers split into `core/` (always run, artifact-parsing) and `plugins/` (opt-
 - [x] `observable_id(type, value)` — deterministic uuid5 for deduplication
 - [x] Core enrichers ([detonator/enrichment/core/](detonator/enrichment/core/))
   - `NavigationEnricher` — extracts the navigation initiator scope from `navigations.json` + HAR
-  - `DomExtractor` — emails, US phone numbers, BTC (legacy + bech32) and ETH wallets, `<form action>` targets, `<meta http-equiv=refresh>` redirects
+  - `ResourceContentEnricher` — iterates captured `site_resource` bodies by MIME type; extracts emails, US phone numbers, BTC (legacy + bech32) and ETH wallets; each observable is linked FOUND_ON the domain of the specific resource URL it appeared in (`text/html` + `text/plain` → email/phone/wallet; `text/javascript` → wallet only)
 - [x] Plugin enrichers ([detonator/enrichment/plugins/](detonator/enrichment/plugins/))
   - `WhoisEnricher` — registrar/dates/name servers/registrant org; creates REGISTRANT observable
   - `DnsEnricher` — A/AAAA/CNAME/MX/NS/TXT; creates IP observables linked with `resolves_to`
@@ -232,11 +232,14 @@ Server-rendered dashboard on the existing FastAPI app. No JS build step, no auth
   - `/ui/` — dashboard (VM provider type, active runs, agent cards, submit form, recent runs)
   - `/ui/config` — VM provider, known VMs, configured agents, egress providers, enrichment modules + exclusion matrix editor, timeouts
   - `/ui/runs` — filtered run list (status / domain / date range / limit); active rows auto-refresh
-  - `/ui/runs/{id}` — run detail: state timeline, artifacts, enrichment summary, observables, technique matches, chain stats, console URL + resume button for interactive runs, zip download link
+  - `/ui/runs/{id}` — run detail: **tabbed layout** (Overview, Network, Resources, Enrichment, Observables, Techniques, Timeline); `?tab=` query param for deep-linking
 - [x] HTMX partials
-  - `/ui/_partials/run-state/{id}` — live state badge
+  - `/ui/_partials/run-state/{id}` — live state badge (polled independently; does not repoll the whole page)
   - `/ui/_partials/runs-table` — live run-list body
   - `/ui/_partials/agents` — live agent status cards
+  - `/ui/_partials/runs/{id}/tab/{name}` — lazy-loaded tab content for HTMX swap
+  - `/ui/_partials/runs/{id}/transactions/{index}` — per-transaction detail card (lazy-loaded on row expand)
+  - `/ui/_partials/runs/{id}/bodies/{basename}/preview` — inline body preview (HTMX `revealed` trigger)
 - [x] Form POSTs
   - `POST /ui/runs` — redirects (303) to `/ui/runs/{id}`
   - `POST /ui/runs/{id}/resume` — redirects back
@@ -246,11 +249,21 @@ Server-rendered dashboard on the existing FastAPI app. No JS build step, no auth
 - [x] `GET /graph/nodes/{node_type}/{node_id}/neighbors` — cytoscape-shaped `{nodes, edges}`
 - [x] `GET /observables/{id}/graph` — observable neighborhood (outgoing links, incoming links, campaigns)
 
+### Network tab — Transaction view (complete)
+- [x] `detonator/ui/transactions.py` — `load_transactions()`, `get_transaction()`, `load_body_preview()` helpers; `Transaction` + `TransactionDetail` + `BodyPreview` dataclasses
+- [x] HAR + sidecar manifest merge; `is_text`/`is_image` classification; initiator-chain walking
+- [x] JSON API parity: `GET /runs/{id}/transactions` → `list[Transaction]`; `GET /runs/{id}/transactions/{index}` → `TransactionDetail`
+- [x] Network tab template (`tabs/network.html`) — filter chips, expandable rows; detail card lazy-loaded via `fetch()` on first expand
+- [x] Transaction detail partial (`tabs/transactions/_row_detail.html`) — request panel, response panel, headers, body preview trigger
+- [x] Body preview partial (`tabs/transactions/_body_preview.html`) — HTMX `revealed` trigger; text mimes → `<pre>`; images → `<img>`; binary → download link
+- [x] Config knob `ui.body_preview_max_bytes` (default 262144 = 256 KiB)
+- [x] Tests: `tests/test_ui_transactions.py` (view-model unit tests); `tests/test_ui_routes_tabs.py` (tab/transaction/preview endpoint smoke tests)
+
 ### Remaining / deferred
 - [ ] **Graph view UI** — cytoscape.js-powered neighborhood explorer. Endpoints exist; frontend not wired.
 - [ ] Campaign UI pages (list + detail) — JSON endpoints present
 - [ ] Observable detail page (currently only reachable via JSON API)
-- [ ] UI TestClient snapshot tests
+- [ ] Syntax highlighting in body preview (plain `<pre>` for now; prism.js can drop in later)
 
 ---
 

@@ -13,7 +13,7 @@ Then call it from the runner's ``_enrich()`` stage::
 The pipeline:
 
 1. Scans *artifact_dir* for a ``har_full.har`` to extract domains / IPs / URLs.
-2. Also checks for ``dom.html`` so the DOM extractor can run.
+2. Checks for ``bodies/`` directory so the resource content enricher can run.
 3. Determines which artifact types are available and fans out to all enrichers
    whose ``accepts()`` returns True for any available type.
 4. Runs all accepted enrichers concurrently (``asyncio.gather`` with
@@ -149,8 +149,8 @@ class EnrichmentPipeline:
         types: list[str] = []
         if (artifact_dir / "har_full.har").exists():
             types.extend(["har", "domain", "ip", "url"])
-        if (artifact_dir / "dom.html").exists():
-            types.append("dom")
+        if (artifact_dir / "bodies").is_dir():
+            types.append("site_resources")
         if (artifact_dir / "navigations.json").exists():
             types.append("navigations")
         return types
@@ -277,7 +277,7 @@ class EnrichmentPipeline:
     ) -> EnrichmentPipeline:
         """Instantiate an ``EnrichmentPipeline`` from ``config.enrichment.modules``.
 
-        Core enrichers (navigations, dom) always run. Plug-in enrichers are
+        Core enrichers (navigations, resources) always run. Plug-in enrichers are
         enabled by listing their short names in config.enrichment.modules.
         Unknown module names are logged and skipped so a typo in config doesn't
         crash the orchestrator at startup. If a name matches a core enricher it

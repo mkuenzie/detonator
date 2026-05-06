@@ -15,6 +15,17 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from detonator.ui.transactions import (
+    BodyPreview,
+    Transaction,
+    TransactionDetail,
+    _find_body_file,
+    _validate_basename,
+    get_transaction,
+    load_body_preview,
+    load_transactions,
+)
+
 from detonator.models import EgressType, RunConfig
 from detonator.orchestrator.state import AppState
 
@@ -351,6 +362,7 @@ def _register_routes(app: FastAPI) -> None:
             run_id=uuid4(),
             egress_provider=egress_provider,
             enrichment_pipeline=deps.enrichment_pipeline,
+            analysis_pipeline=deps.analysis_pipeline,
         )
         task = asyncio.create_task(runner.execute())
         deps.register(runner, task)
@@ -358,8 +370,12 @@ def _register_routes(app: FastAPI) -> None:
 
     # Run detail ---------------------------------------------------
 
+    _VALID_TABS = frozenset(
+        ("overview", "network", "resources", "enrichment", "observables", "techniques")
+    )
+
     @app.get("/ui/runs/{run_id}", include_in_schema=False, response_class=HTMLResponse)
-    async def run_detail(run_id: UUID, request: Request):
+    async def run_detail(run_id: UUID, request: Request, tab: str = Query("overview")):
         deps = _deps(request)
         row = await deps.database.get_run(str(run_id))
         if not row:
@@ -396,17 +412,6 @@ def _register_routes(app: FastAPI) -> None:
         manifest = _read_manifest(deps, str(run_id))
         enrichment = _read_enrichment(deps, str(run_id))
 
-        navigations = _read_navigations(deps, str(run_id))
-        _seen: set[str] = set()
-        nav_domains: list[str] = []
-        for n in navigations:
-            if n.get("frame") != "main":
-                continue
-            domain = urlparse(n.get("url", "")).netloc
-            if domain and domain not in _seen:
-                _seen.add(domain)
-                nav_domains.append(domain)
-
         site_resources = sorted(
             [a for a in artifacts if a.get("type") == "site_resource"],
             key=lambda a: a.get("captured_at") or "",
@@ -428,6 +433,15 @@ def _register_routes(app: FastAPI) -> None:
 
         is_terminal = row.get("status") in {"complete", "error"}
 
+        active_tab = tab if tab in _VALID_TABS else "overview"
+
+        transactions: list = []
+        if active_tab == "network":
+            import asyncio
+            transactions = await asyncio.get_event_loop().run_in_executor(
+                None, load_transactions, run_dir
+            )
+
         return TEMPLATES.TemplateResponse(
             request,
             "run_detail.html",
@@ -444,9 +458,12 @@ def _register_routes(app: FastAPI) -> None:
                 "observables": run_observables,
                 "is_active": runner is not None,
                 "is_terminal": is_terminal,
-                "navigations": nav_domains,
+                "navigations": _build_nav_chain(deps, str(run_id)),
                 "site_resources": site_resources,
                 "request_bodies": request_bodies,
+                "active_tab": active_tab,
+                "transactions": transactions,
+                "run_id": str(run_id),
             },
         )
 
@@ -553,6 +570,162 @@ def _register_routes(app: FastAPI) -> None:
             {"agents": agents},
         )
 
+    # Tab partials -------------------------------------------------
+
+    @app.get(
+        "/ui/_partials/runs/{run_id}/tab/{name}",
+        include_in_schema=False,
+        response_class=HTMLResponse,
+    )
+    async def partial_run_tab(run_id: UUID, name: str, request: Request):
+        deps = _deps(request)
+        if name not in _VALID_TABS:
+            raise HTTPException(404, f"Unknown tab: {name}")
+        row = await deps.database.get_run(str(run_id))
+        if not row:
+            raise HTTPException(404)
+
+        run_dir = deps.artifact_store.run_dir(str(run_id))
+        artifacts = await deps.database.get_artifacts(str(run_id))
+        for a in artifacts:
+            try:
+                a["rel_path"] = str(Path(a["path"]).relative_to(run_dir))
+            except (ValueError, TypeError):
+                a["rel_path"] = Path(a["path"]).name if a.get("path") else ""
+
+        run_cfg: dict = {}
+        try:
+            run_cfg = json.loads(row.get("config_json") or "{}")
+        except Exception:
+            pass
+
+        transitions = _read_transitions(deps, str(run_id))
+        manifest = _read_manifest(deps, str(run_id))
+        enrichment = _read_enrichment(deps, str(run_id))
+        site_resources = sorted(
+            [a for a in artifacts if a.get("type") == "site_resource"],
+            key=lambda a: a.get("captured_at") or "",
+        )
+        request_bodies = sorted(
+            [a for a in artifacts if a.get("type") == "request_body"],
+            key=lambda a: a.get("captured_at") or "",
+        )
+        technique_matches = await deps.database.get_technique_matches_for_run(str(run_id))
+        for tm in technique_matches:
+            if tm.get("evidence_json"):
+                try:
+                    tm["evidence"] = json.loads(tm["evidence_json"])
+                except Exception:
+                    pass
+        run_observables = await _load_run_observables(deps, str(run_id))
+        runner = deps.get_runner(run_id)
+        can_resume = (
+            row.get("status") == "interactive"
+            and runner is not None
+            and runner.record.config.interactive
+        )
+        console_url = None
+        if row.get("status") == "interactive" and runner is not None:
+            vm_id = runner.record.config.vm_id or runner.agent.vm_id
+            try:
+                console_url = await deps.vm_provider.get_console_url(vm_id)
+            except Exception:
+                pass
+
+        transactions: list = []
+        if name == "network":
+            import asyncio
+            transactions = await asyncio.get_event_loop().run_in_executor(
+                None, load_transactions, run_dir
+            )
+
+        ctx = {
+            "run": row,
+            "run_cfg": run_cfg,
+            "artifacts": artifacts,
+            "transitions": transitions,
+            "console_url": console_url,
+            "can_resume": can_resume,
+            "manifest": manifest,
+            "enrichment": enrichment,
+            "technique_matches": technique_matches,
+            "observables": run_observables,
+            "navigations": _build_nav_chain(deps, str(run_id)),
+            "site_resources": site_resources,
+            "request_bodies": request_bodies,
+            "transactions": transactions,
+            "run_id": str(run_id),
+        }
+        return TEMPLATES.TemplateResponse(request, f"tabs/{name}.html", ctx)
+
+    # Transaction detail partial -----------------------------------
+
+    @app.get(
+        "/ui/_partials/runs/{run_id}/transactions/{index}",
+        include_in_schema=False,
+        response_class=HTMLResponse,
+    )
+    async def partial_transaction_detail(run_id: UUID, index: int, request: Request):
+        deps = _deps(request)
+        row = await deps.database.get_run(str(run_id))
+        if not row:
+            raise HTTPException(404)
+        run_dir = deps.artifact_store.run_dir(str(run_id))
+        import asyncio
+        tx = await asyncio.get_event_loop().run_in_executor(
+            None, get_transaction, run_dir, index
+        )
+        if tx is None:
+            raise HTTPException(404, f"Transaction {index} not found")
+        return TEMPLATES.TemplateResponse(
+            request,
+            "tabs/transactions/_row_detail.html",
+            {"tx": tx, "run_id": str(run_id)},
+        )
+
+    # Body preview partial -----------------------------------------
+
+    @app.get(
+        "/ui/_partials/runs/{run_id}/bodies/{basename}/preview",
+        include_in_schema=False,
+        response_class=HTMLResponse,
+    )
+    async def partial_body_preview(run_id: UUID, basename: str, request: Request):
+        deps = _deps(request)
+        if not _validate_basename(basename):
+            raise HTTPException(400, "Invalid basename")
+        row = await deps.database.get_run(str(run_id))
+        if not row:
+            raise HTTPException(404)
+        run_dir = deps.artifact_store.run_dir(str(run_id))
+
+        if _find_body_file(run_dir, basename) is None:
+            raise HTTPException(404, f"Body {basename} not found for this run")
+
+        max_bytes = deps.config.ui.body_preview_max_bytes
+
+        import asyncio
+        from functools import partial as functools_partial
+
+        all_txns = await asyncio.get_event_loop().run_in_executor(
+            None, load_transactions, run_dir
+        )
+        mime: str | None = None
+        for tx in all_txns:
+            if tx.body_basename == basename:
+                mime = tx.mime_type
+                break
+
+        preview = await asyncio.get_event_loop().run_in_executor(
+            None,
+            functools_partial(load_body_preview, run_dir, basename, mime, max_bytes),
+        )
+        return TEMPLATES.TemplateResponse(
+            request,
+            "tabs/transactions/_body_preview.html",
+            {"preview": preview, "run_id": str(run_id)},
+        )
+
 
 # ── Artifact readers ──────────────────────────────────────────────
 
@@ -617,6 +790,168 @@ def _read_navigations(deps: AppState, run_id: str) -> list[dict]:
             return json.load(f)
     except Exception:
         return []
+
+
+def _build_nav_chain(deps: AppState, run_id: str) -> list[dict]:
+    """Build an enriched navigation chain from navigations.json + HAR.
+
+    Mirrors the redirect-expansion logic in NavigationEnricher: HTTP 3xx
+    intermediates that Playwright never fires framenavigated for are spliced
+    in from the HAR redirect chain so the displayed chain matches the network tab.
+
+    Each entry: url, domain, scheme, status, ip, mime, trigger,
+    timestamp, domain_changed, delta_ms.
+    """
+    raw = _read_navigations(deps, run_id)
+    if not raw:
+        return []
+
+    main = [n for n in raw if n.get("frame") == "main"]
+    deduped: list[dict] = []
+    for n in main:
+        if not deduped or n["url"] != deduped[-1]["url"]:
+            deduped.append(n)
+    if not deduped:
+        return []
+
+    # Build HAR lookups from a single pass
+    har_lookup: dict[str, dict] = {}   # url → response metadata
+    redirect_map: dict[str, str] = {}  # url → Location header (for 3xx entries)
+    har_path = deps.artifact_store.run_dir(run_id) / "har_full.har"
+    if har_path.exists():
+        try:
+            har = json.loads(har_path.read_text(encoding="utf-8"))
+            for entry in har.get("log", {}).get("entries", []):
+                url = entry.get("request", {}).get("url", "")
+                if not url:
+                    continue
+                resp = entry.get("response", {})
+                status = resp.get("status") or None
+                mime_raw = resp.get("content", {}).get("mimeType") or ""
+                if url not in har_lookup:
+                    har_lookup[url] = {
+                        "status": status,
+                        "ip": entry.get("serverIPAddress") or None,
+                        "mime": mime_raw.split(";")[0].strip() or None,
+                        "initiator_type": entry.get("_initiator", {}).get("type", ""),
+                    }
+                if status and 300 <= int(status) < 400 and url not in redirect_map:
+                    for h in resp.get("headers", []):
+                        if h.get("name", "").lower() == "location":
+                            redirect_map[url] = h["value"]
+                            break
+        except Exception:
+            pass
+
+    # Build reverse map: location_url → [source_urls] for backward chain tracing
+    location_to_url: dict[str, list[str]] = {}
+    for url, location in redirect_map.items():
+        location_to_url.setdefault(location, []).append(url)
+
+    # Splice in HTTP redirect intermediates that framenavigated never sees.
+    # Two strategies:
+    #   1. Forward walk: follow redirect_map from the committed nav URL directly.
+    #   2. Backward walk: when the page's JS appends params before redirecting
+    #      (e.g. ?t=1), the committed nav URL doesn't appear in redirect_map.
+    #      Walk backward from the NEXT committed nav URL until we hit the
+    #      from-nav's domain, collecting the chain in reverse.
+    def _intermediates(from_url: str, to_url: str) -> list[str]:
+        from_domain = urlparse(from_url).netloc
+
+        # Forward walk
+        fwd: list[str] = []
+        seen: set[str] = {from_url}
+        cur = from_url
+        for _ in range(20):
+            target = redirect_map.get(cur)
+            if not target or target in seen:
+                break
+            seen.add(target)
+            if target == to_url:
+                return fwd
+            fwd.append(target)
+            cur = target
+
+        # Backward walk from to_url; stop when we reach from_domain
+        chain_back: list[str] = []
+        visited: set[str] = {to_url}
+        cur = to_url
+        for _ in range(20):
+            sources = location_to_url.get(cur, [])
+            src = next((s for s in sources if s not in visited), None)
+            if not src:
+                break
+            if src == from_url:
+                return list(reversed(chain_back))
+            visited.add(src)
+            if urlparse(src).netloc == from_domain:
+                break  # same-domain JS variant — don't include it
+            chain_back.append(src)
+            cur = src
+
+        return list(reversed(chain_back))
+
+    expanded: list[dict] = []
+    for i, nav in enumerate(deduped):
+        expanded.append(nav)
+        if i + 1 >= len(deduped):
+            continue
+        ts = nav.get("timestamp", "")
+        for mid_url in _intermediates(nav["url"], deduped[i + 1]["url"]):
+            expanded.append({"timestamp": ts, "url": mid_url, "frame": "main", "via": "http_redirect"})
+
+    chain: list[dict] = []
+    prev_domain: str | None = None
+    first_ts: float | None = None
+
+    for i, nav in enumerate(expanded):
+        url = nav.get("url", "")
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        scheme = parsed.scheme
+        har = har_lookup.get(url, {})
+        status = har.get("status")
+        ip = har.get("ip")
+        mime = har.get("mime")
+
+        if nav.get("via") == "http_redirect" or (status and 300 <= int(status) < 400):
+            trigger = "redirect"
+        elif har.get("initiator_type") == "script":
+            trigger = "script"
+        elif i == 0:
+            trigger = "navigation"
+        else:
+            trigger = "unknown"
+
+        ts_str = nav.get("timestamp", "")
+        ts_seconds: float | None = None
+        try:
+            ts_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            ts_seconds = ts_dt.timestamp()
+            if first_ts is None:
+                first_ts = ts_seconds
+        except Exception:
+            pass
+
+        delta_ms: int | None = None
+        if ts_seconds is not None and first_ts is not None:
+            delta_ms = int((ts_seconds - first_ts) * 1000)
+
+        chain.append({
+            "url": url,
+            "domain": domain,
+            "scheme": scheme,
+            "status": status,
+            "ip": ip,
+            "mime": mime,
+            "trigger": trigger,
+            "timestamp": ts_str,
+            "domain_changed": domain != prev_domain,
+            "delta_ms": delta_ms,
+        })
+        prev_domain = domain
+
+    return chain
 
 
 async def _load_run_observables(deps: AppState, run_id: str) -> list[dict]:

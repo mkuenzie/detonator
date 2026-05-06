@@ -415,6 +415,8 @@ class Runner:
             return ArtifactType.DOM
         if "console" in lower:
             return ArtifactType.CONSOLE
+        if "websockets" in lower and lower.endswith(".json"):
+            return ArtifactType.WEBSOCKETS
         return ArtifactType.META
 
     async def _enrich(self) -> None:

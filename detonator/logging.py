@@ -70,7 +70,12 @@ class RunAdapter(logging.LoggerAdapter):
         return msg, kwargs
 
 
-def setup_logging(level: str = "INFO", *, json_logs: bool = False) -> None:
+def setup_logging(
+    level: str = "INFO",
+    *,
+    json_logs: bool = False,
+    log_file: str | None = None,
+) -> None:
     """Configure the root logger.
 
     This function is idempotent: if the root logger already has handlers it
@@ -85,12 +90,19 @@ def setup_logging(level: str = "INFO", *, json_logs: bool = False) -> None:
     if root.handlers:
         return
 
-    handler = logging.StreamHandler()
+    formatter: logging.Formatter
     if json_logs:
-        handler.setFormatter(JsonFormatter())
+        formatter = JsonFormatter()
     else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)-8s %(name)s  %(message)s")
-        )
-    root.addHandler(handler)
+        formatter = logging.Formatter("%(asctime)s %(levelname)-8s %(name)s  %(message)s")
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    root.addHandler(stream_handler)
+
+    if log_file:
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
+
     root.setLevel(level.upper())

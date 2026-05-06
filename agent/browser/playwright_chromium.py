@@ -15,6 +15,7 @@ from agent.browser.base import BrowserModule, DetonationRequest, DetonationResul
 from agent.browser.cdp_response_tap import CDPResponseTap
 from agent.browser.network_capture import NetworkCapture
 from agent.browser.route_document_interceptor import RouteDocumentInterceptor
+from agent.browser.websocket_capture import WebSocketCapture
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,18 @@ class PlaywrightChromiumModule(BrowserModule):
         user_data_dir = str(self._artifact_dir / "user-data")
 
         if stealth.enabled:
+            # Playwright's --disable-features list includes features that real Chrome
+            # has enabled. We ignore the whole string and replace it with a sanitized
+            # version that only disables UI/noise features, not behavioral ones.
+            # NOTE: this string must match Playwright's exact default — verify against
+            # chrome_cmdline.txt after Playwright upgrades.
+            _PW_DISABLE_FEATURES = (
+                "--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,"
+                "BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,"
+                "DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,"
+                "MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,"
+                "AutoDeElevate,RenderDocument,OptimizationHints"
+            )
             context_kwargs: dict[str, Any] = dict(
                 channel="chrome",
                 headless=False,
@@ -76,9 +89,57 @@ class PlaywrightChromiumModule(BrowserModule):
                     "--no-first-run",
                     "--password-store=basic",
                     "--use-mock-keychain",
+                    "--no-sandbox",  # required in VM — sandbox needs kernel features unavailable in guests
+                    # Required to prevent Chrome from self-relaunching on Windows. All
+                    # three are process-level / OS-integration flags and are NOT
+                    # JS-observable. --edge-skip-compat-layer-relaunch despite the name
+                    # also applies to Chrome (shared Chromium compat-shim code path);
+                    # without it Chrome's first process spawns a brief window, exits,
+                    # and relaunches itself, leaving patchright's CDP pipe attached to
+                    # the dead original process.
+                    "--edge-skip-compat-layer-relaunch",
+                    "--no-service-autorun",
+                    "--disable-field-trial-config",
                     f"--accept-lang={stealth.locale},{stealth.locale.split('-')[0]}",
+                    # Replace Playwright's --disable-features with a sanitized list.
+                    # Playwright disables real-Chrome behavioral features (HttpsUpgrades,
+                    # PaintHolding, ThirdPartyStoragePartitioning, RenderDocument, etc.)
+                    # that Turnstile can fingerprint. We keep UI/noise suppressions and
+                    # Windows process-management features that patchright needs for the
+                    # CDP pipe to stay attached (AutoDeElevate — without this, Chrome can
+                    # relaunch itself to drop UAC elevation, breaking the CDP connection).
+                    "--disable-features=AutoDeElevate,DestroyProfileOnBrowserClose,"
+                    "DialMediaRouteProvider,GlobalMediaControls,MediaRouter,Translate",
                 ],
-                ignore_default_args=["--enable-automation", "--enable-logging"],
+                # CRITICAL: ignore_default_args filters the *final* args list (defaults +
+                # ours), not just defaults. Any flag listed here will be stripped even
+                # if we explicitly pass it in `args`. So this list must contain ONLY
+                # flags we want gone entirely — never flags we also pass in `args`.
+                # Harmless duplication on the cmdline is acceptable; missing flags are not.
+                ignore_default_args=[
+                    "--enable-automation",
+                    "--enable-logging",
+                    # Stealth-critical removals — must NOT also appear in args:
+                    "--force-color-profile=srgb",       # canvas pixel shifts
+                    "--disable-background-networking",
+                    "--disable-sync",
+                    "--disable-extensions",
+                    "--metrics-recording-only",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-background-timer-throttling",
+                    "--disable-breakpad",
+                    "--disable-dev-shm-usage",
+                    "--disable-hang-monitor",
+                    "--disable-infobars",
+                    "--disable-prompt-on-repost",
+                    "--disable-renderer-backgrounding",
+                    "--disable-search-engine-choice-screen",
+                    "--export-tagged-pdf",
+                    # Replace Playwright's --disable-features with our sanitized version
+                    # in args. NOTE: must match Playwright's exact string — verify
+                    # chrome_cmdline.txt after Playwright/Patchright upgrades.
+                    _PW_DISABLE_FEATURES,
+                ],
                 locale=stealth.locale,
                 timezone_id=stealth.timezone_id,
                 viewport={"width": stealth.viewport_width, "height": stealth.viewport_height},
@@ -116,6 +177,7 @@ class PlaywrightChromiumModule(BrowserModule):
         capture.attach(self._context)
         tap = CDPResponseTap(sink=capture)
         doc_intercept = RouteDocumentInterceptor(sink=capture)
+        ws_capture = WebSocketCapture(self._artifact_dir / "bodies")
 
         if stealth.enabled:
             await self._context.add_init_script(
@@ -124,11 +186,31 @@ class PlaywrightChromiumModule(BrowserModule):
             await self._context.add_init_script(path=str(_STEALTH_JS))
 
         self._page = await self._context.new_page()
+
+        # Capture active Chrome flags by reading the OS process cmdline. This avoids
+        # touching the page (navigating to chrome://version/ destabilizes patchright)
+        # and also captures everything before patchright reaches us, including driver-
+        # internal flags.
+        try:
+            import psutil
+            chrome_procs = [
+                p for p in psutil.process_iter(["name", "cmdline"])
+                if p.info["name"] and "chrome" in p.info["name"].lower()
+                and p.info["cmdline"] and user_data_dir in " ".join(p.info["cmdline"])
+            ]
+            if chrome_procs:
+                cmdline = " ".join(chrome_procs[0].info["cmdline"])
+                logger.debug("Chrome command line: %s", cmdline)
+                (self._artifact_dir / "chrome_cmdline.txt").write_text(cmdline, encoding="utf-8")
+        except Exception as e:
+            logger.debug("Chrome cmdline capture failed: %s", e)
+
         # Attach CDP tap after new_page() so context.pages already includes this
         # page. attach_to_context awaits Network.enable for every page in the list,
         # guaranteeing it completes before goto() is called below.
         await tap.attach_to_context(self._context)
         await doc_intercept.attach_to_context(self._context)
+        await ws_capture.attach_to_context(self._context)
         self._page.on("console", self._on_console)
         self._page.on("pageerror", self._on_page_error)
 
@@ -199,6 +281,7 @@ class PlaywrightChromiumModule(BrowserModule):
             logger.error("Navigation error: %s", exc)
             await doc_intercept.drain()
             await tap.drain()
+            await ws_capture.drain()
             await capture.drain()
             stats = capture.finalize()
             return DetonationResult(error=str(exc), meta=self._build_meta(stats))
@@ -222,8 +305,14 @@ class PlaywrightChromiumModule(BrowserModule):
         
         await doc_intercept.drain()
         await tap.drain()
+        await ws_capture.drain()
         await capture.drain()
         stats = capture.finalize()
+
+        ws_data = ws_capture.finalize()
+        if ws_data:
+            ws_path = self._artifact_dir / "websockets.json"
+            ws_path.write_text(json.dumps(ws_data, indent=2, default=str), encoding="utf-8")
 
         await self._context.close()
         self._context = None

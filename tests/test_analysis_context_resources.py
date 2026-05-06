@@ -35,7 +35,7 @@ def _make_artifact(
     p = tmp_path / filename
     p.write_text(body, encoding="utf-8")
     return {
-        "artifact_type": artifact_type,
+        "type": artifact_type,
         "source_url": source_url,
         "path": str(p),
         "size": len(body.encode()),

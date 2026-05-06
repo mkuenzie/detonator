@@ -66,16 +66,16 @@ def build_manifest(
         except Exception:
             logger.warning("manifest run=%s: failed to parse enrichment.json", run_id)
 
-    # Chain / filter summary from filter_result.json (written by the filter stage).
+    # Filter summary from filter_result.json (written by the filter stage).
     chain_summary: dict[str, Any] | None = None
     filter_path = artifact_dir / "filter_result.json"
     if filter_path.exists():
         try:
             fr = json.loads(filter_path.read_text("utf-8"))
             chain_summary = {
-                "chain_requests": fr.get("chain_requests", 0),
+                "total_requests": fr.get("total_requests", 0),
+                "scope_requests": fr.get("scope_requests", 0),
                 "noise_requests": fr.get("noise_requests", 0),
-                "technique_hit_count": len(fr.get("technique_hits", [])),
             }
         except Exception:
             logger.warning("manifest run=%s: failed to parse filter_result.json", run_id)

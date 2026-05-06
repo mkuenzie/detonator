@@ -1,9 +1,9 @@
-"""Tests for the Phase 4 enrichment pipeline.
+"""Tests for the enrichment pipeline.
 
 Covers:
   - HAR extractor
   - TLD enricher (no I/O)
-  - DOM extractor (no I/O)
+  - ResourceContentEnricher (no network I/O)
   - EnrichmentPipeline.run() end-to-end against fixture artifacts
   - observable_id determinism
   - Pipeline skips gracefully when artifacts are missing
@@ -12,15 +12,14 @@ Covers:
 from __future__ import annotations
 
 import json
-import tempfile
 import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from detonator.enrichment.base import EnrichmentResult, RunContext, observable_id
-from detonator.enrichment.core.dom import DomExtractor
+from detonator.enrichment.core.resources import ResourceContentEnricher
 from detonator.enrichment.har import extract_from_har
 from detonator.enrichment.pipeline import EnrichmentPipeline
 from detonator.enrichment.plugins.tld import TldEnricher
@@ -52,22 +51,33 @@ _HAR_FIXTURE = {
     }
 }
 
-_DOM_FIXTURE = """<!DOCTYPE html>
+_BODY_HTML = """\
+<!DOCTYPE html>
 <html>
-<head>
-  <meta http-equiv="refresh" content="0; url=https://phish.evil.example.com/verify">
-</head>
 <body>
   <p>Contact us: victim@bank.com or call 415-867-5309</p>
   <p>Send BTC to: 1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf95</p>
   <p>Send ETH to: 0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe</p>
-  <form action="/submit" method="post">
-    <input type="email" name="email">
-    <button type="submit">Go</button>
-  </form>
 </body>
 </html>
 """
+
+
+def _write_body_artifact(tmp_path: Path, basename: str, content: str, url: str, mime: str) -> None:
+    bodies = tmp_path / "bodies"
+    bodies.mkdir(exist_ok=True)
+    (bodies / basename).write_text(content, encoding="utf-8")
+    manifest = bodies / "manifest.jsonl"
+    entry = json.dumps({
+        "basename": basename,
+        "url": url,
+        "direction": "response",
+        "method": "GET",
+        "mime_type": mime,
+        "capture_outcome": "ok",
+    })
+    with manifest.open("a", encoding="utf-8") as f:
+        f.write(entry + "\n")
 
 
 # ── HAR extractor tests ────────────────────────────────────────────
@@ -81,7 +91,6 @@ def test_extract_from_har_domains_and_ips(tmp_path: Path) -> None:
 
     assert "evil.example.com" in domains
     assert "cdn.jsdelivr.net" in domains
-    # Raw IP host should not appear in domains
     assert "1.2.3.4" not in domains
     assert "1.2.3.4" in ips
     assert "2.3.4.5" in ips
@@ -161,60 +170,49 @@ async def test_tld_enricher_empty_context() -> None:
     assert results == []
 
 
-# ── DOM extractor ─────────────────────────────────────────────────
+# ── ResourceContentEnricher ────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_dom_extractor_email(tmp_path: Path) -> None:
-    (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
-    extractor = DomExtractor()
+async def test_resource_enricher_email(tmp_path: Path) -> None:
+    _write_body_artifact(tmp_path, "landing.html", _BODY_HTML, "https://evil.example.com/", "text/html")
+    enricher = ResourceContentEnricher()
     ctx = RunContext(run_id="r1", artifact_dir=str(tmp_path), seed_url="https://evil.example.com")
-    results = await extractor.enrich(ctx)
+    results = await enricher.enrich(ctx)
 
     assert len(results) == 1
-    result = results[0]
-    assert result.error is None
-
-    obs_by_type = {}
-    for obs in result.observables:
-        obs_by_type.setdefault(obs.type, []).append(obs.value)
-
-    assert any("victim@bank.com" in v for v in obs_by_type.get(ObservableType.EMAIL, []))
+    assert results[0].error is None
+    assert any(o.value == "victim@bank.com" for o in results[0].observables if o.type == ObservableType.EMAIL)
 
 
 @pytest.mark.asyncio
-async def test_dom_extractor_phone(tmp_path: Path) -> None:
-    (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
-    extractor = DomExtractor()
+async def test_resource_enricher_phone(tmp_path: Path) -> None:
+    _write_body_artifact(tmp_path, "landing.html", _BODY_HTML, "https://evil.example.com/", "text/html")
+    enricher = ResourceContentEnricher()
     ctx = RunContext(run_id="r1", artifact_dir=str(tmp_path), seed_url="https://evil.example.com")
-    results = await extractor.enrich(ctx)
+    results = await enricher.enrich(ctx)
 
-    obs_types = {obs.type for obs in results[0].observables}
+    obs_types = {o.type for o in results[0].observables}
     assert ObservableType.PHONE in obs_types
 
 
 @pytest.mark.asyncio
-async def test_dom_extractor_crypto_wallets(tmp_path: Path) -> None:
-    (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
-    extractor = DomExtractor()
+async def test_resource_enricher_crypto_wallets(tmp_path: Path) -> None:
+    _write_body_artifact(tmp_path, "landing.html", _BODY_HTML, "https://evil.example.com/", "text/html")
+    enricher = ResourceContentEnricher()
     ctx = RunContext(run_id="r1", artifact_dir=str(tmp_path), seed_url="https://evil.example.com")
-    results = await extractor.enrich(ctx)
+    results = await enricher.enrich(ctx)
 
-    obs_by_type = {}
-    for obs in results[0].observables:
-        obs_by_type.setdefault(obs.type, []).append(obs.value)
-
-    wallets = obs_by_type.get(ObservableType.CRYPTO_WALLET, [])
+    wallets = [o.value for o in results[0].observables if o.type == ObservableType.CRYPTO_WALLET]
     assert any("btc:" in w for w in wallets)
     assert any("eth:" in w for w in wallets)
 
 
 @pytest.mark.asyncio
-async def test_dom_extractor_missing_file(tmp_path: Path) -> None:
-    extractor = DomExtractor()
+async def test_resource_enricher_missing_bodies_dir(tmp_path: Path) -> None:
+    enricher = ResourceContentEnricher()
     ctx = RunContext(run_id="r1", artifact_dir=str(tmp_path), seed_url="https://evil.example.com")
-    results = await extractor.enrich(ctx)
-    # No dom.html → no results (silent skip)
+    results = await enricher.enrich(ctx)
     assert results == []
 
 
@@ -223,9 +221,9 @@ async def test_dom_extractor_missing_file(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_pipeline_runs_enrichers_and_writes_json(tmp_path: Path) -> None:
-    """Pipeline fans out to TLD + DOM enrichers against fixture artifacts."""
+    """Pipeline fans out to TLD + resource enrichers against fixture artifacts."""
     (tmp_path / "har_full.har").write_text(json.dumps(_HAR_FIXTURE), encoding="utf-8")
-    (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
+    _write_body_artifact(tmp_path, "landing.html", _BODY_HTML, "https://evil.example.com/", "text/html")
 
     mock_db = MagicMock()
     mock_db.upsert_observable = AsyncMock()
@@ -233,32 +231,24 @@ async def test_pipeline_runs_enrichers_and_writes_json(tmp_path: Path) -> None:
     mock_db.link_observables = AsyncMock()
     mock_db.list_enrichment_exclusions = AsyncMock(return_value={})
 
-    mock_store = MagicMock()
-
-    from detonator.enrichment.core.dom import DomExtractor
-    from detonator.enrichment.plugins.tld import TldEnricher
-
     pipeline = EnrichmentPipeline(
-        enrichers=[TldEnricher(), DomExtractor()],
+        enrichers=[TldEnricher(), ResourceContentEnricher()],
         database=mock_db,
-        artifact_store=mock_store,
+        artifact_store=MagicMock(),
     )
 
     results = await pipeline.run("run-1", str(tmp_path), "https://evil.example.com/landing?q=1")
 
-    # Should have results from both enrichers
     enricher_names = {r.enricher for r in results}
     assert "tld" in enricher_names
-    assert "dom" in enricher_names
+    assert "resources" in enricher_names
 
-    # enrichment.json should be written
     enrich_json = tmp_path / "enrichment.json"
     assert enrich_json.exists()
     payload = json.loads(enrich_json.read_text())
     assert payload["run_id"] == "run-1"
     assert len(payload["results"]) == len(results)
 
-    # DB observable upserts should have been called
     assert mock_db.upsert_observable.called
 
 
@@ -266,12 +256,11 @@ async def test_pipeline_runs_enrichers_and_writes_json(tmp_path: Path) -> None:
 async def test_pipeline_no_artifacts(tmp_path: Path) -> None:
     """Pipeline returns empty list when no artifact types are available."""
     mock_db = MagicMock()
-    mock_store = MagicMock()
 
     pipeline = EnrichmentPipeline(
-        enrichers=[TldEnricher(), DomExtractor()],
+        enrichers=[TldEnricher(), ResourceContentEnricher()],
         database=mock_db,
-        artifact_store=mock_store,
+        artifact_store=MagicMock(),
     )
 
     results = await pipeline.run("run-2", str(tmp_path), "https://example.com")
@@ -282,7 +271,7 @@ async def test_pipeline_no_artifacts(tmp_path: Path) -> None:
 async def test_pipeline_failing_enricher_does_not_abort(tmp_path: Path) -> None:
     """A crash in one enricher should not abort the other enrichers."""
     (tmp_path / "har_full.har").write_text(json.dumps(_HAR_FIXTURE), encoding="utf-8")
-    (tmp_path / "dom.html").write_text(_DOM_FIXTURE, encoding="utf-8")
+    _write_body_artifact(tmp_path, "landing.html", _BODY_HTML, "https://evil.example.com/", "text/html")
 
     mock_db = MagicMock()
     mock_db.upsert_observable = AsyncMock()
@@ -290,7 +279,6 @@ async def test_pipeline_failing_enricher_does_not_abort(tmp_path: Path) -> None:
     mock_db.link_observables = AsyncMock()
     mock_db.list_enrichment_exclusions = AsyncMock(return_value={})
 
-    # Build a broken enricher that always raises
     class _BrokenEnricher:
         name = "broken"
 
@@ -308,9 +296,7 @@ async def test_pipeline_failing_enricher_does_not_abort(tmp_path: Path) -> None:
 
     results = await pipeline.run("run-3", str(tmp_path), "https://evil.example.com")
 
-    # TLD results should still be present
     assert any(r.enricher == "tld" for r in results)
-    # Broken enricher should produce an error result
     assert any(r.enricher == "broken" and r.error for r in results)
 
 
@@ -319,15 +305,18 @@ def test_pipeline_build_from_config() -> None:
     from detonator.config import DetonatorConfig, EnrichmentConfig
     from detonator.enrichment.pipeline import EnrichmentPipeline
 
-    cfg = DetonatorConfig(enrichment=EnrichmentConfig(modules=["tld", "dom", "nonexistent_module"]))
+    cfg = DetonatorConfig(enrichment=EnrichmentConfig(modules=["tld", "nonexistent_module"]))
     mock_db = MagicMock()
-    mock_store = MagicMock()
 
-    pipeline = EnrichmentPipeline.build_from_config(cfg, mock_db, mock_store)
+    pipeline = EnrichmentPipeline.build_from_config(cfg, mock_db, MagicMock())
     names = [e.name for e in pipeline._enrichers]
 
+    # Core enrichers always present
+    assert "navigations" in names
+    assert "resources" in names
+    # Plugin enabled by config
     assert "tld" in names
-    assert "dom" in names
+    # Unknown module silently skipped
     assert "nonexistent_module" not in names
 
 
@@ -336,9 +325,6 @@ def test_pipeline_build_from_config() -> None:
 
 @pytest.mark.asyncio
 async def test_tld_enricher_excludes_config_host() -> None:
-    """Config-supplied exclude_hosts are filtered from TLD enricher."""
-    from detonator.enrichment.plugins.tld import TldEnricher
-
     enricher = TldEnricher(exclude_hosts=["cdn.example.com"])
     ctx = RunContext(run_id="r1", artifact_dir="/tmp", seed_url="https://evil.example.com")
     ctx.domains = ["evil.example.com", "cdn.example.com"]
@@ -350,9 +336,6 @@ async def test_tld_enricher_excludes_config_host() -> None:
 
 @pytest.mark.asyncio
 async def test_exclusion_suffix_match() -> None:
-    """Listing googleapis.com excludes fonts.googleapis.com but not googleapis.com.attacker.com."""
-    from detonator.enrichment.plugins.tld import TldEnricher
-
     enricher = TldEnricher(exclude_hosts=["googleapis.com"])
     ctx = RunContext(run_id="r1", artifact_dir="/tmp", seed_url="https://attacker.com")
     ctx.domains = ["fonts.googleapis.com", "googleapis.com.attacker.com", "attacker.com"]
@@ -360,17 +343,13 @@ async def test_exclusion_suffix_match() -> None:
     results = await enricher.enrich(ctx)
     values = {r.input_value for r in results}
 
-    # suffix match: fonts.googleapis.com is excluded
     assert "fonts.googleapis.com" not in values
-    # tricky: attacker.com domain does NOT end with .googleapis.com
     assert "googleapis.com.attacker.com" in values
     assert "attacker.com" in values
 
 
 @pytest.mark.asyncio
 async def test_exclusion_per_enricher_independence() -> None:
-    """Excluding a host from whois does not exclude it from tld."""
-    from detonator.enrichment.plugins.tld import TldEnricher
     from detonator.enrichment.plugins.whois import WhoisEnricher
 
     whois = WhoisEnricher(exclude_hosts=["cdn.example.com"])
@@ -381,7 +360,6 @@ async def test_exclusion_per_enricher_independence() -> None:
 
 
 def test_exclude_hosts_from_config_applied() -> None:
-    """Hosts supplied via exclude_hosts are excluded; others are not."""
     from detonator.enrichment.plugins.whois import WhoisEnricher
 
     enricher = WhoisEnricher(exclude_hosts=["jsdelivr.net", "cloudflare.com"])
@@ -392,7 +370,6 @@ def test_exclude_hosts_from_config_applied() -> None:
 
 
 def test_empty_exclude_hosts_excludes_nothing() -> None:
-    """With an empty list nothing is excluded."""
     from detonator.enrichment.plugins.whois import WhoisEnricher
 
     enricher = WhoisEnricher(exclude_hosts=[])

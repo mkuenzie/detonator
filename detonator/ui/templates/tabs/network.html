@@ -1,0 +1,99 @@
+{% if transactions %}
+<div class="tx-filter-chips" id="tx-filter-chips">
+  <button class="tx-chip active" data-filter="all" onclick="txFilter(this,'all')">All <span class="tx-chip-count">({{ transactions|length }})</span></button>
+  <button class="tx-chip" data-filter="document" onclick="txFilter(this,'document')">Documents</button>
+  <button class="tx-chip" data-filter="script" onclick="txFilter(this,'script')">Scripts</button>
+  <button class="tx-chip" data-filter="xhr" onclick="txFilter(this,'xhr')">XHR/Fetch</button>
+  <button class="tx-chip" data-filter="image" onclick="txFilter(this,'image')">Images</button>
+  <button class="tx-chip" data-filter="stylesheet" onclick="txFilter(this,'stylesheet')">CSS</button>
+  <button class="tx-chip" data-filter="other" onclick="txFilter(this,'other')">Other</button>
+</div>
+
+<div class="tx-table-wrap">
+  <table class="tx-table">
+    <thead>
+      <tr>
+        <th style="width:2.5rem">#</th>
+        <th style="width:5rem">Status</th>
+        <th style="width:4rem">Method</th>
+        <th style="width:18rem">Host</th>
+        <th>Path</th>
+        <th style="width:7rem">Type</th>
+        <th style="width:5rem">Size</th>
+      </tr>
+    </thead>
+    <tbody id="tx-tbody">
+    {% for tx in transactions %}
+      <tr class="tx-row" data-resource-type="{{ tx.resource_type }}"
+          data-run-id="{{ run_id }}"
+          data-tx-index="{{ tx.index }}"
+          data-expanded="false"
+          onclick="txToggleDetail(this)">
+        <td class="muted mono">{{ tx.index + 1 }}</td>
+        <td><span class="tx-status {{ tx.status_class }}">{{ tx.status or '—' }}</span></td>
+        <td class="mono">{{ tx.method }}</td>
+        <td class="mono" title="{{ tx.host }}">{{ tx.host }}</td>
+        <td class="mono" title="{{ tx.url }}">{{ tx.path }}</td>
+        <td class="muted mono" style="font-size:0.8em">{{ tx.resource_type }}</td>
+        <td class="muted">{{ tx.size_response|bytes if tx.size_response is not none else '—' }}</td>
+      </tr>
+      <tr class="tx-detail-row" id="tx-detail-{{ tx.index }}" style="display:none">
+        <td colspan="7">
+          <div class="tx-detail-placeholder">Loading…</div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function txFilter(btn, filter) {
+  document.querySelectorAll('.tx-chip').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('#tx-tbody .tx-row').forEach(row => {
+    const rtype = row.dataset.resourceType || '';
+    let show = false;
+    if (filter === 'all') show = true;
+    else if (filter === 'xhr') show = rtype === 'xhr' || rtype === 'fetch';
+    else show = rtype === filter;
+    const next = row.nextElementSibling;
+    row.style.display = show ? '' : 'none';
+    if (next && next.classList.contains('tx-detail-row')) {
+      if (!show) next.style.display = 'none';
+    }
+  });
+}
+
+function txToggleDetail(row) {
+  const expanded = row.dataset.expanded === 'true';
+  const idx = row.dataset.txIndex;
+  const runId = row.dataset.runId;
+  const detailRow = document.getElementById('tx-detail-' + idx);
+  if (!detailRow) return;
+
+  if (expanded) {
+    detailRow.style.display = 'none';
+    row.dataset.expanded = 'false';
+    return;
+  }
+
+  detailRow.style.display = '';
+  row.dataset.expanded = 'true';
+
+  const placeholder = detailRow.querySelector('.tx-detail-placeholder');
+  if (!placeholder || placeholder.dataset.loaded === 'true') return;
+
+  fetch('/ui/_partials/runs/' + runId + '/transactions/' + idx)
+    .then(r => r.text())
+    .then(html => {
+      placeholder.innerHTML = html;
+      placeholder.dataset.loaded = 'true';
+      htmx.process(placeholder);
+    })
+    .catch(() => { placeholder.textContent = 'Failed to load detail.'; });
+}
+</script>
+{% else %}
+<p class="muted">No HAR data captured for this run.</p>
+{% endif %}

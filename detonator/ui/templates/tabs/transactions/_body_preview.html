@@ -1,0 +1,12 @@
+{% if preview.text is not none %}
+<div class="body-preview-wrap">
+  {% if preview.truncated %}
+    <div class="muted" style="font-size:0.8em;margin-bottom:0.25rem">Showing first {{ preview.size_bytes|bytes }} — <a href="/runs/{{ run_id }}/artifacts/bodies/{{ preview.basename }}">download full</a></div>
+  {% endif %}
+  <pre class="body-preview"><code>{{ preview.text }}</code></pre>
+</div>
+{% elif preview.is_image %}
+<img src="/runs/{{ run_id }}/artifacts/bodies/{{ preview.basename }}" style="max-width:100%;max-height:400px;border-radius:4px" loading="lazy" alt="Response body">
+{% else %}
+<span class="muted" style="font-size:0.85em">Binary body ({{ preview.mime_type or 'unknown' }}, {{ preview.size_bytes|bytes }}) — <a href="/runs/{{ run_id }}/artifacts/bodies/{{ preview.basename }}">download</a></span>
+{% endif %}

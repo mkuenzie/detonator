@@ -365,6 +365,81 @@ def _register_routes(app: FastAPI) -> None:
 
         return row
 
+    @app.get("/runs/{run_id}/transactions", summary="List HTTP transactions from HAR")
+    async def list_transactions(run_id: UUID, request: Request) -> list[dict]:
+        """Return all HTTP transactions merged from HAR + sidecar manifest."""
+        deps = _deps(request)
+        row = await deps.database.get_run(str(run_id))
+        if not row:
+            raise HTTPException(404, f"Run {run_id} not found")
+        run_dir = deps.artifact_store.run_dir(str(run_id))
+        import asyncio
+        from detonator.ui.transactions import load_transactions as _load_transactions
+        txns = await asyncio.get_event_loop().run_in_executor(
+            None, _load_transactions, run_dir
+        )
+        return [
+            {
+                "index": t.index,
+                "started_at": t.started_at,
+                "time_ms": t.time_ms,
+                "method": t.method,
+                "url": t.url,
+                "status": t.status,
+                "mime_type": t.mime_type,
+                "resource_type": t.resource_type,
+                "size_response": t.size_response,
+                "size_request": t.size_request,
+                "server_ip": t.server_ip,
+                "initiator_type": t.initiator_type,
+                "initiator_url": t.initiator_url,
+                "body_basename": t.body_basename,
+                "capture_outcome": t.capture_outcome,
+                "is_text": t.is_text,
+                "is_image": t.is_image,
+            }
+            for t in txns
+        ]
+
+    @app.get("/runs/{run_id}/transactions/{index}", summary="Get single HTTP transaction detail")
+    async def get_transaction_detail(run_id: UUID, index: int, request: Request) -> dict:
+        """Return full transaction detail including request/response headers and initiator chain."""
+        deps = _deps(request)
+        row = await deps.database.get_run(str(run_id))
+        if not row:
+            raise HTTPException(404, f"Run {run_id} not found")
+        run_dir = deps.artifact_store.run_dir(str(run_id))
+        import asyncio
+        from detonator.ui.transactions import get_transaction as _get_transaction
+        tx = await asyncio.get_event_loop().run_in_executor(
+            None, _get_transaction, run_dir, index
+        )
+        if tx is None:
+            raise HTTPException(404, f"Transaction {index} not found")
+        return {
+            "index": tx.index,
+            "started_at": tx.started_at,
+            "time_ms": tx.time_ms,
+            "method": tx.method,
+            "url": tx.url,
+            "status": tx.status,
+            "mime_type": tx.mime_type,
+            "resource_type": tx.resource_type,
+            "size_response": tx.size_response,
+            "size_request": tx.size_request,
+            "server_ip": tx.server_ip,
+            "initiator_type": tx.initiator_type,
+            "initiator_url": tx.initiator_url,
+            "body_basename": tx.body_basename,
+            "capture_outcome": tx.capture_outcome,
+            "is_text": tx.is_text,
+            "is_image": tx.is_image,
+            "request_headers": [{"name": k, "value": v} for k, v in tx.request_headers],
+            "response_headers": [{"name": k, "value": v} for k, v in tx.response_headers],
+            "frame_url": tx.frame_url,
+            "initiator_chain": tx.initiator_chain,
+        }
+
     @app.get("/runs/{run_id}/artifacts/{artifact_name:path}")
     async def get_run_artifact(
         run_id: UUID, artifact_name: str, request: Request
@@ -644,7 +719,7 @@ def main() -> None:
     config_path = sys.argv[1] if len(sys.argv) > 1 else "config.toml"
     config = load_config(config_path)
     json_logs = "--json-logs" in sys.argv
-    setup_logging(level=config.log_level, json_logs=json_logs)
+    setup_logging(level=config.log_level, json_logs=json_logs, log_file=config.log_file)
     app = create_app(config)
     uvicorn.run(app, host="0.0.0.0", port=8080)
 

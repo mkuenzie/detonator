@@ -1,0 +1,21 @@
+{% if technique_matches %}
+<div>
+  {% for tm in technique_matches %}
+  <article class="card" style="margin-bottom:0.5rem">
+    <header><strong>{{ tm.name or tm.technique_id }}</strong>
+      {% if tm.signature_type %}<span class="muted">· {{ tm.signature_type }}</span>{% endif %}
+      {% if tm.confidence %}<span class="muted">· confidence {{ "%.2f"|format(tm.confidence) }}</span>{% endif %}
+    </header>
+    {% if tm.description %}<p class="muted" style="margin:0.3rem 0">{{ tm.description }}</p>{% endif %}
+    {% if tm.evidence %}
+      <details class="json">
+        <summary>Evidence</summary>
+        <pre>{{ tm.evidence | tojson(indent=2) }}</pre>
+      </details>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<p class="muted">No technique matches for this run.</p>
+{% endif %}

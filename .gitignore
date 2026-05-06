@@ -8,3 +8,4 @@ build/
 data/
 *.db
 config.toml
+.claude/
