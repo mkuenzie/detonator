@@ -7,10 +7,35 @@
   const locale = window.__stealthLocale__ || 'en-US';
   const localeLang = locale.split('-')[0];
 
+  // ── Function.prototype.toString spoofing ──────────────────────────────────
+  // Must run before any patching. V8's Function.prototype.toString reads the
+  // [[SourceText]] internal slot, bypassing instance .toString overrides.
+  // We override Function.prototype.toString itself with a WeakSet guard so
+  // that .call(patchedFn) returns the native-code string.
+  var _nativified = new WeakSet();
+  var _origFnToString = Function.prototype.toString;
+  var _toStringOverride = function toString() {
+    if (_nativified.has(this)) {
+      return 'function ' + (this.name || '') + '() { [native code] }';
+    }
+    return _origFnToString.call(this);
+  };
+  Function.prototype.toString = _toStringOverride;
+  _nativified.add(_toStringOverride); // make our override itself look native
+
+  function nativeify(wrapper, original) {
+    _nativified.add(wrapper);
+    Object.defineProperty(wrapper, 'name', { value: original.name, configurable: true });
+    Object.defineProperty(wrapper, 'length', { value: original.length, configurable: true });
+    return wrapper;
+  }
+
   // 1. Remove navigator.webdriver
   Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 
-  // 2. Shim window.chrome (real Chrome always has this)
+  // 2. Shim window.chrome (real Chrome always has this).
+  //    In a headed Chromium the chrome object already exists but runtime may be
+  //    absent in automation mode — patch it unconditionally.
   if (!window.chrome) {
     window.chrome = {
       app: { isInstalled: false, InstallState: {}, RunningState: {} },
@@ -18,6 +43,11 @@
       loadTimes: function () {},
       runtime: {},
     };
+  } else {
+    if (!window.chrome.runtime)    window.chrome.runtime    = {};
+    if (!window.chrome.app)        window.chrome.app        = { isInstalled: false, InstallState: {}, RunningState: {} };
+    if (!window.chrome.csi)        window.chrome.csi        = function () {};
+    if (!window.chrome.loadTimes)  window.chrome.loadTimes  = function () {};
   }
 
   // 3. Realistic navigator.plugins (PDF Viewer + Chrome PDF Viewer)
@@ -70,13 +100,13 @@
 
   // 5. navigator.permissions.query — automation mode returns "denied" for notifications;
   //    real browsers return "default" until the user is prompted.
-  const originalQuery = navigator.permissions.query.bind(navigator.permissions);
-  navigator.permissions.query = function (params) {
+  var _origQuery = navigator.permissions.query.bind(navigator.permissions);
+  navigator.permissions.query = nativeify(function query(params) {
     if (params && params.name === 'notifications') {
       return Promise.resolve({ state: 'default', onchange: null });
     }
-    return originalQuery(params);
-  };
+    return _origQuery(params);
+  }, navigator.permissions.query);
 
   // 6. navigator.languages — must match locale and Accept-Language header
   Object.defineProperty(navigator, 'languages', { get: function () { return [locale, localeLang]; } });
@@ -91,21 +121,21 @@
   (function patchWebGL(Ctor) {
     if (!Ctor) return;
     var orig = Ctor.prototype.getParameter;
-    Ctor.prototype.getParameter = function (param) {
+    Ctor.prototype.getParameter = nativeify(function getParameter(param) {
       if (param === UNMASKED_VENDOR) return _wglVendor;
       if (param === UNMASKED_RENDERER) return _wglRenderer;
       return orig.call(this, param);
-    };
+    }, orig);
   })(window.WebGLRenderingContext);
 
   (function patchWebGL2(Ctor) {
     if (!Ctor) return;
     var orig = Ctor.prototype.getParameter;
-    Ctor.prototype.getParameter = function (param) {
+    Ctor.prototype.getParameter = nativeify(function getParameter(param) {
       if (param === UNMASKED_VENDOR) return _wglVendor;
       if (param === UNMASKED_RENDERER) return _wglRenderer;
       return orig.call(this, param);
-    };
+    }, orig);
   })(window.WebGL2RenderingContext);
 
   // 8. Hardware fingerprint — match a typical analyst workstation
@@ -129,22 +159,11 @@
   //     the audio stack. Both produce VM-distinctive values that land in Cloudflare's known-bad
   //     set.
   //
-  //     All overrides are made to look native via Function.prototype.toString spoofing so that
-  //     `fn.toString()` still returns "function name() { [native code] }". Without this,
-  //     Turnstile's prototype-integrity checks detect the override directly.
+  //     Noise is position/index-deterministic (fixed seed per page load) so repeated reads of
+  //     the same region return identical values — stability checks pass. The seed changes each
+  //     navigation so the fingerprint differs across sessions.
   (function patchFingerprintAPIs() {
     var seed = (Math.random() * 0xFFFFFFFF) >>> 0;
-
-    // Make a wrapped function appear native to toString() and property checks.
-    function nativeify(wrapper, original) {
-      Object.defineProperty(wrapper, 'name', { value: original.name, configurable: true });
-      Object.defineProperty(wrapper, 'length', { value: original.length, configurable: true });
-      var nativeStr = 'function ' + original.name + '() { [native code] }';
-      wrapper.toString = function () { return nativeStr; };
-      // Also spoof Function.prototype.toString.call(wrapper)
-      Object.defineProperty(wrapper, Symbol.toStringTag, { value: undefined, configurable: true });
-      return wrapper;
-    }
 
     function pixelNoise(x, y, ch) {
       var h = (seed ^ (x * 374761393) ^ (y * 668265263) ^ (ch * 2654435761)) >>> 0;
