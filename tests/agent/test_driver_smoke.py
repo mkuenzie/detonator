@@ -1,24 +1,31 @@
 """Smoke tests for the browser driver indirection layer.
 
 These tests verify that:
-1. The _driver module exports async_playwright and _DRIVER correctly.
-2. Both patchright and playwright can be imported (catches a bad package release
-   at dependency-upgrade time rather than mid-lab-run).
-3. (Optional, skipped unless browser binaries are present) Both drivers can
-   launch a context and navigate to about:blank.
+1. The _driver module exports _DRIVER correctly.
+2. Camoufox, patchright, and playwright can each be imported (catches a bad
+   package release at dependency-upgrade time rather than mid-lab-run).
+3. CamoufoxFirefoxModule and PlaywrightChromiumModule satisfy the BrowserModule ABC.
 
-These tests are skipped in host-side dev environments where neither playwright
-nor patchright is installed (both live in the ``agent`` extras, not ``dev``).
+These tests are skipped in host-side dev environments where the agent extras
+are not installed (camoufox/playwright/patchright live in the ``agent`` extras,
+not ``dev``).
 
-To revert to vanilla Playwright: change _DRIVER to "playwright" in
-agent/browser/_driver.py and reinstall (``playwright install chrome``).
+To switch drivers: change _DRIVER in agent/browser/_driver.py.
+  camoufox   → default; Firefox + C++-level fingerprint spoofing
+  patchright → patched Chromium fallback
+  playwright → vanilla Chromium for debugging
 """
 
 from __future__ import annotations
 
 import pytest
 
-# Determine which drivers are available in this environment.
+try:
+    import camoufox as _cf  # noqa: F401
+    CAMOUFOX_AVAILABLE = True
+except ImportError:
+    CAMOUFOX_AVAILABLE = False
+
 try:
     import playwright as _pl  # noqa: F401
     PLAYWRIGHT_AVAILABLE = True
@@ -31,31 +38,41 @@ try:
 except ImportError:
     PATCHRIGHT_AVAILABLE = False
 
-EITHER_AVAILABLE = PLAYWRIGHT_AVAILABLE or PATCHRIGHT_AVAILABLE
+ANY_AVAILABLE = CAMOUFOX_AVAILABLE or PLAYWRIGHT_AVAILABLE or PATCHRIGHT_AVAILABLE
 
 pytestmark = pytest.mark.skipif(
-    not EITHER_AVAILABLE,
-    reason="playwright/patchright not installed in this environment (agent extras)",
+    not ANY_AVAILABLE,
+    reason="agent browser extras not installed in this environment",
 )
-
-
-def test_driver_module_exports_async_playwright():
-    """The _driver module exports async_playwright regardless of which driver is active."""
-    from agent.browser._driver import async_playwright, _DRIVER  # noqa: F401
-
-    assert callable(async_playwright)
-    assert _DRIVER in ("patchright", "playwright")
 
 
 def test_driver_constant_is_valid():
     """_DRIVER must be one of the supported driver names."""
     from agent.browser._driver import _DRIVER
 
-    assert _DRIVER in ("patchright", "playwright"), f"Unknown driver: {_DRIVER!r}"
+    assert _DRIVER in ("camoufox", "patchright", "playwright"), f"Unknown driver: {_DRIVER!r}"
+
+
+def test_driver_default_is_camoufox():
+    """Default driver should be camoufox."""
+    from agent.browser._driver import _DRIVER
+
+    assert _DRIVER == "camoufox", (
+        f"Expected default driver 'camoufox', got {_DRIVER!r}. "
+        "Update this test if intentionally switching the default."
+    )
+
+
+def test_camoufox_importable():
+    """camoufox and browserforge must be importable."""
+    if not CAMOUFOX_AVAILABLE:
+        pytest.skip("camoufox not installed in this environment")
+    from camoufox.async_api import AsyncCamoufox  # noqa: F401
+    from browserforge.fingerprints import FingerprintGenerator  # noqa: F401
 
 
 def test_playwright_importable():
-    """playwright must always be importable (patchright depends on it)."""
+    """playwright must be importable (patchright peer dep and fallback driver)."""
     if not PLAYWRIGHT_AVAILABLE:
         pytest.skip("playwright not installed in this environment")
     from playwright.async_api import async_playwright as _pw  # noqa: F401
@@ -66,3 +83,29 @@ def test_patchright_importable():
     if not PATCHRIGHT_AVAILABLE:
         pytest.skip("patchright not installed in this environment")
     from patchright.async_api import async_playwright as _pw  # noqa: F401
+
+
+def test_camoufox_module_satisfies_abc():
+    """CamoufoxFirefoxModule must be a concrete BrowserModule implementation."""
+    if not CAMOUFOX_AVAILABLE:
+        pytest.skip("camoufox not installed in this environment")
+    from agent.browser.base import BrowserModule
+    from agent.browser.camoufox_firefox import CamoufoxFirefoxModule
+
+    assert issubclass(CamoufoxFirefoxModule, BrowserModule)
+    instance = CamoufoxFirefoxModule()
+    assert isinstance(instance, BrowserModule)
+    assert instance.name == "camoufox_firefox"
+
+
+def test_playwright_chromium_module_satisfies_abc():
+    """PlaywrightChromiumModule must remain a concrete BrowserModule implementation."""
+    if not PLAYWRIGHT_AVAILABLE:
+        pytest.skip("playwright not installed in this environment")
+    from agent.browser.base import BrowserModule
+    from agent.browser.playwright_chromium import PlaywrightChromiumModule
+
+    assert issubclass(PlaywrightChromiumModule, BrowserModule)
+    instance = PlaywrightChromiumModule()
+    assert isinstance(instance, BrowserModule)
+    assert instance.name == "playwright_chromium"

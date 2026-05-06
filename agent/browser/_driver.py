@@ -1,17 +1,25 @@
-"""Browser driver indirection — flip _DRIVER to switch between Patchright and Playwright.
+"""Browser driver indirection — flip _DRIVER to switch between Camoufox, Patchright, and Playwright.
 
-Patchright patches the Runtime.enable CDP leak (the canonical tell that defeats
-naive Playwright stealth) plus a cluster of smaller fingerprint vectors.
-It is wire-compatible with Playwright's async API.
+Camoufox (default): Firefox fork with C++-level fingerprint spoofing via
+BrowserForge.  Avoids the JS-override detection vectors that defeat patched
+Chromium.  Uses its own async_api — does not need async_playwright.
 
-To revert to vanilla Playwright: change _DRIVER to "playwright" and reinstall
-(``playwright install chrome``).  No other code changes required.
+Patchright: patches the Runtime.enable CDP leak and a cluster of smaller
+fingerprint vectors on Chromium.  Wire-compatible with Playwright's async API.
+
+Playwright (vanilla): upstream Playwright with no stealth patches.  Useful
+for debugging HAR issues where stealth overhead is a confound.
+
+To switch drivers: change _DRIVER below and reinstall the matching binary.
+  camoufox   → ``pip install camoufox[geoip] browserforge && python -m camoufox fetch``
+  patchright → ``pip install patchright && patchright install chrome``
+  playwright → ``playwright install chromium``
 """
 
 from __future__ import annotations
 
-# Flip to "playwright" to revert to vanilla upstream.
-_DRIVER = "patchright"
+# Change this to "patchright" or "playwright" to revert to a Chromium driver.
+_DRIVER = "camoufox"
 
 if _DRIVER == "patchright":
     try:
@@ -24,5 +32,13 @@ if _DRIVER == "patchright":
             stacklevel=1,
         )
         from playwright.async_api import async_playwright  # noqa: F401
-else:
+elif _DRIVER == "playwright":
     from playwright.async_api import async_playwright  # noqa: F401
+else:
+    # camoufox — async_playwright is not used; CamoufoxFirefoxModule imports
+    # AsyncCamoufox directly.  Re-export a no-op placeholder so that any code
+    # importing async_playwright from this module doesn't break at import time.
+    try:
+        from playwright.async_api import async_playwright  # noqa: F401
+    except ImportError:
+        async_playwright = None  # type: ignore[assignment]

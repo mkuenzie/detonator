@@ -9,7 +9,7 @@ This guide covers preparing a base VM image that the orchestrator can snapshot a
 - **OS**: Windows 10 or 11 (Pro recommended for RDP/remote management). Linux support is planned for a future release.
 - **Desktop**: Standard Windows desktop. The browser runs headed for v1 — there is no headless mode.
 - **Python**: 3.11 or later, **64-bit** (install from [python.org](https://www.python.org/downloads/)).
-- **Disk**: 40 GB minimum (Windows base + Python + Chromium).
+- **Disk**: 40 GB minimum (Windows base + Python + Firefox/Chromium).
 - **Network**: Single NIC on the isolated detonation bridge (e.g. `vmbr1`). The host controls routing and egress.
 - **Proxmox guest tools**: Install the [VirtIO drivers](https://pve.proxmox.com/wiki/Windows_VirtIO_Drivers) and QEMU guest agent for network info and clean shutdown support.
 
@@ -50,15 +50,7 @@ scp -r agent/ detonator@<vm-ip>:C:/Users/detonator/agent/
 
 Or use a shared folder, RDP file transfer, or any other method to place the files at `C:\Users\detonator\agent\`.
 
-### 4. Install Google Chrome
-
-The agent drives a **real Google Chrome install** (not the Playwright-bundled Chromium) to avoid the build-fingerprint and user-agent tells that cloakers check.
-
-Download and install the latest stable Chrome for Windows from the official source. The installer places Chrome at `C:\Program Files\Google\Chrome\Application\chrome.exe`, which is the path Playwright's `channel="chrome"` resolves to.
-
-If you prefer to keep using the bundled Chromium (e.g. for testing or environments without a Chrome license), set `stealth.enabled = false` in your agent config — this skips the `channel="chrome"` option and falls back to bundled Chromium.
-
-### 5. Set up the Python environment
+### 4. Set up the Python environment
 
 Open PowerShell as the `detonator` user:
 
@@ -66,31 +58,37 @@ Open PowerShell as the `detonator` user:
 cd C:\Users\detonator
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install fastapi uvicorn playwright patchright msvc-runtime
+pip install fastapi uvicorn msvc-runtime camoufox[geoip] browserforge playwright patchright
+python -m camoufox fetch
 playwright install chromium
 patchright install chrome
 ```
 
-`playwright install chromium` installs the Playwright-managed Chromium fallback (used when `stealth.enabled = false` or when the Patchright driver is switched off). The real Chrome install from step 4 is used by default via Patchright.
+**What each step does:**
 
-`patchright install chrome` installs Patchright's patched Chrome binaries, which patch the `Runtime.enable` CDP leak and several other fingerprint vectors that anti-bot systems check.
+- `camoufox[geoip] browserforge`: the default stealth driver. Camoufox is a hardened Firefox fork that spoofs fingerprints at the C++ level via BrowserForge, making spoofed attributes appear native rather than as JS property overrides.
+- `python -m camoufox fetch`: downloads camoufox's own Firefox binary (separate from the system Firefox install).
+- `playwright` and `playwright install chromium`: required by patchright as a peer dependency; also provides the Playwright-managed Chromium for the patchright/playwright fallback drivers.
+- `patchright install chrome`: installs patchright's patched Chrome binaries (used only when `_DRIVER = "patchright"`).
+- `msvc-runtime`: drops the Microsoft Visual C++ runtime DLLs into the venv. Required because playwright's `greenlet` dependency links against MSVC, which is absent on a fresh Windows install.
 
-> **Note:** `msvc-runtime` is required because `playwright`'s `greenlet` dependency (2.0+) links against the Microsoft Visual C++ runtime, which is not present on a fresh Windows install. Without it, `import greenlet` fails with `ImportError: DLL load failed while importing _greenlet: The specified module could not be found`. `msvc-runtime` drops the needed DLLs into the venv — no system-wide VC++ Redistributable installer required.
+> **Note on Google Chrome**: Chrome is no longer required for the default camoufox driver. If you switch to the patchright driver, install Chrome from the official source — `patchright install chrome` fetches Patchright's patched binaries which require a real Chrome install alongside them.
 
 ### Switching browser drivers
 
 The active driver is controlled by a single constant in `agent/browser/_driver.py`:
 
 ```python
-_DRIVER = "patchright"   # default — stealth-hardened, passes Cloudflare/DataDome
-# _DRIVER = "playwright"  # vanilla upstream — useful when debugging a Patchright-specific issue
+_DRIVER = "camoufox"    # default — Firefox + C++-level fingerprint spoofing
+# _DRIVER = "patchright"  # patched Chromium — fallback if camoufox breaks a site
+# _DRIVER = "playwright"  # vanilla Chromium — debug only, no stealth
 ```
 
-To revert to vanilla Playwright:
-1. Change `_DRIVER = "playwright"` in `agent/browser/_driver.py`.
-2. Re-deploy the agent code to the VM (no reinstall needed — both packages are already installed).
+To switch:
+1. Change `_DRIVER` in `agent/browser/_driver.py`.
+2. Re-deploy the agent code (no reinstall needed — all packages are already installed).
 
-Every run records which driver was active in `DetonationResult.meta["browser_driver"]`, so a Patchright regression is answerable from run history alone.
+Every run records which driver was active in `DetonationResult.meta["browser_driver"]`.
 
 ### 5. Verify the agent starts
 
@@ -104,7 +102,7 @@ From the host, confirm the health endpoint responds:
 
 ```bash
 curl http://<vm-ip>:8000/health
-# Expected: {"status":"ok","browser":"playwright_chromium"}
+# Expected: {"status":"ok","browser":"camoufox_firefox"}
 ```
 
 Stop the agent with `Ctrl+C` once verified.

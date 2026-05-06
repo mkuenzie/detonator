@@ -25,7 +25,7 @@ _DEFAULT_EXCLUSIONS: dict[str, list[str]] = {
         "googleapis.com", "gstatic.com", "google-analytics.com", "googletagmanager.com",
         "doubleclick.net", "amazonaws.com", "cloudfront.net", "azureedge.net",
         "akamaihd.net", "akamaized.net", "fbcdn.net", "bootstrapcdn.com", "jquery.com",
-        "google.com", "bing.com", "jquery.com", "patchright-init-script-inject.internal"
+        "google.com", "bing.com", "jquery.com"
     ],
     "tls": [
         "jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com",

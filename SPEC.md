@@ -52,10 +52,11 @@ Living document tracking what's built, what's next, and what's deferred. Code is
 ### Done
 - [x] Agent REST API: `/health`, `/detonate`, `/status`, `/resume`, `/artifacts`, `/artifacts/{name}` ([agent/api.py](agent/api.py))
 - [x] `BrowserModule` ABC + `DetonationRequest` / `DetonationResult` / `StealthProfile` ([agent/browser/base.py](agent/browser/base.py))
-- [x] Playwright Chromium module ([agent/browser/playwright_chromium.py](agent/browser/playwright_chromium.py)) — HAR capture, screenshots, DOM dump, console collection, navigation timeline, interactive pause/resume
-- [x] `NetworkCapture` — SHA-256-addressed body store + `bodies/manifest.jsonl` ([agent/browser/network_capture.py](agent/browser/network_capture.py))
-- [x] `CDPResponseTap` — per-page CDP Network listener pulling bodies in `loadingFinished` ([agent/browser/cdp_response_tap.py](agent/browser/cdp_response_tap.py))
-- [x] `RouteDocumentInterceptor` — main-frame document body capture ([agent/browser/route_document_interceptor.py](agent/browser/route_document_interceptor.py))
+- [x] Camoufox Firefox module ([agent/browser/camoufox_firefox.py](agent/browser/camoufox_firefox.py)) — C++-level fingerprint spoofing via BrowserForge, HAR capture, screenshots, DOM dump, console collection, navigation timeline, interactive pause/resume
+- [x] Playwright Chromium module ([agent/browser/playwright_chromium.py](agent/browser/playwright_chromium.py)) — patchright/Chromium fallback driver
+- [x] `NetworkCapture` — SHA-1-addressed body store + `bodies/manifest.jsonl` ([agent/browser/network_capture.py](agent/browser/network_capture.py))
+- [x] `CDPResponseTap` — per-page CDP Network listener (Chromium only) ([agent/browser/cdp_response_tap.py](agent/browser/cdp_response_tap.py))
+- [x] `RouteDocumentInterceptor` — main-frame document body capture (Chromium only) ([agent/browser/route_document_interceptor.py](agent/browser/route_document_interceptor.py))
 - [x] Agent entrypoint / uvicorn launcher ([agent/config.py](agent/config.py))
 - [x] Windows base image setup guide ([agent/README.md](agent/README.md))
 - [x] End-to-end smoke validated against a real Windows VM

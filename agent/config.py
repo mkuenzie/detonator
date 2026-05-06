@@ -8,7 +8,7 @@ import sys
 import uvicorn
 
 from agent.api import app, configure_agent
-from agent.browser.playwright_chromium import PlaywrightChromiumModule
+from agent.browser._driver import _DRIVER
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,7 +17,13 @@ logging.basicConfig(
 
 
 def main() -> None:
-    browser = PlaywrightChromiumModule()
+    if _DRIVER == "camoufox":
+        from agent.browser.camoufox_firefox import CamoufoxFirefoxModule
+        browser = CamoufoxFirefoxModule()
+    else:
+        from agent.browser.playwright_chromium import PlaywrightChromiumModule
+        browser = PlaywrightChromiumModule()
+
     configure_agent(browser)
 
     host = sys.argv[1] if len(sys.argv) > 1 else "0.0.0.0"

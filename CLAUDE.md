@@ -38,34 +38,33 @@ Analyst → Host Orchestrator (FastAPI)
             ├── Transaction view-model (detonator/ui/transactions.py)
             └── Storage (SQLite metadata + filesystem CAS)
 
-In-VM Agent (FastAPI + Playwright Chromium, headed)
+In-VM Agent (FastAPI + Camoufox Firefox, headed)
             ├── REST API: /health, /detonate, /status, /resume, /artifacts[/name]
             └── Capture subsystems (all write into bodies/ + manifest.jsonl):
-                  ├── Playwright HAR (record_har_content="attach")
-                  ├── NetworkCapture          (request bodies via context.on)
-                  ├── CDPResponseTap          (response bodies via Network.getResponseBody)
-                  └── RouteDocumentInterceptor (main-frame document bodies)
+                  ├── HAR recording  (record_har_content="attach" — all response bodies)
+                  ├── NetworkCapture (request bodies via context.on)
+                  └── WebSocketCapture (WS frames via page.on("websocket"))
+                  [Chromium fallback: +CDPResponseTap, +RouteDocumentInterceptor]
 ```
 
 ## Capture & ingestion (important detail)
 
-The agent runs **four** capture subsystems in parallel, all landing in `bodies/<sha1>.<ext>`:
+The active browser module is **`CamoufoxFirefoxModule`** (camoufox + Firefox). It runs **three** capture subsystems, all landing in `bodies/<sha1>.<ext>`:
 
-1. **Playwright HAR attach mode** writes `har_full.har` with per-entry `_file` refs; Playwright names body files by **SHA-1** of the body (its native scheme).
-2. **`NetworkCapture`** ([agent/browser/network_capture.py](agent/browser/network_capture.py)) handles request bodies via `context.on("request")` and is the sink for the CDP tap. **Also names body files by SHA-1**, deliberately matching Playwright's scheme so both paths share files on disk. Writes one JSONL line per capture event to `bodies/manifest.jsonl`.
-3. **`CDPResponseTap`** ([agent/browser/cdp_response_tap.py](agent/browser/cdp_response_tap.py)) attaches a CDP session per page and pulls response bodies inside `loadingFinished` — closes the disposal race that makes `response.body()` miss main-frame docs on fast-redirecting pages. Feeds into `NetworkCapture` as a sink.
-4. **`RouteDocumentInterceptor`** ([agent/browser/route_document_interceptor.py](agent/browser/route_document_interceptor.py)) catches main-frame document responses via route interception (subresources fall back to the CDP tap). It exists because an earlier per-page `Fetch.enable` CDP interceptor raced with patchright's own Fetch channel and stalled cross-origin navigations.
+1. **HAR recording** (`record_har_content="attach"`) writes `har_full.har` with per-entry `_file` refs; the HAR writer names body files by **SHA-1** of the body (its native scheme).
+2. **`NetworkCapture`** ([agent/browser/network_capture.py](agent/browser/network_capture.py)) handles request bodies via `context.on("request")`. **Also names body files by SHA-1**, matching the HAR scheme so both paths share files on disk. Writes one JSONL line per capture event to `bodies/manifest.jsonl`.
+3. **`WebSocketCapture`** ([agent/browser/websocket_capture.py](agent/browser/websocket_capture.py)) records WebSocket frames per page.
 
-Host ingestion in `Runner._collect_artifacts()` unions two body-ref sources **by basename**: `map_body_files(har_full.har)` + `load_capture_manifest(bodies/manifest.jsonl)`. Because both paths now use SHA-1, the union is a clean strict-set union — same content = same basename = one artifact row.
+Host ingestion in `Runner._collect_artifacts()` unions two body-ref sources **by basename**: `map_body_files(har_full.har)` + `load_capture_manifest(bodies/manifest.jsonl)`. Because both paths use SHA-1, the union is a clean strict-set union — same content = same basename = one artifact row.
 
-### Why both paths are required (don't try to "simplify" by deleting one)
+### Chromium fallback subsystems (PlaywrightChromiumModule only)
 
-Empirically (`scripts/capture_diff.py` across multiple runs) each path covers the other's gap:
+`CDPResponseTap` and `RouteDocumentInterceptor` are still present in the codebase and active when `_DRIVER` is set to `"patchright"` or `"playwright"`. They are not used by `CamoufoxFirefoxModule` because:
 
-- **HAR attach** has a documented race where Chromium disposes main-frame document bodies on fast redirects before Playwright's writer reads them. The CDP tap closes this race by reading inside `loadingFinished`.
-- **The agent stack** misses cross-origin iframe documents because `CDPResponseTap` attaches per-page (`context.new_cdp_session(page)`) and Chromium's site isolation puts OOPIFs in a separate renderer / CDP target the page session never sees. Playwright's HAR writer catches them because it lives in the browser process and is wired into every target.
+- **CDPResponseTap**: CDP (`new_cdp_session`) is Chromium-only. Firefox exposes no equivalent. HAR attach mode covers response bodies.
+- **RouteDocumentInterceptor**: `context.route()` triggers PerimeterX/Datadome bot detection and defeats camoufox's stealth purpose. Firefox also doesn't have Chromium's main-frame body disposal race that motivated the interceptor.
 
-There's a load-bearing observer effect: the agent stack's own per-request CDP/route latency is what gives Playwright's HAR writer enough time to win its body-read race. Recent runs show `manifest_only ≈ 0` (HAR is a strict superset of agent capture by URL), but two older runs in the corpus show `manifest_only > 0`, proving the gap is real and only suppressed by the capture infrastructure's own presence. **Deleting either path will reintroduce gaps.** The "duplication" is the price of completeness; SHA-1 alignment makes that duplication free at the file and ingestion layers.
+The four-subsystem note in the original design (`scripts/capture_diff.py` analysis) applies to Chromium runs. For Firefox/camoufox, HAR attach mode is the authoritative response-body source.
 
 ## Three-tier data model
 
@@ -82,7 +81,7 @@ Relationship tables (`observable_links`, `run_observables`, `campaign_observable
 | Boundary | Abstraction | First implementation |
 |---|---|---|
 | Hypervisor | `VMProvider` | Proxmox (`proxmoxer`) |
-| Browser | `BrowserModule` | Playwright Chromium, headed |
+| Browser | `BrowserModule` | Camoufox Firefox, headed (patchright/Chromium fallback) |
 | Egress — direct | `EgressProvider` | Linux bridge + nftables |
 | Egress — tether | `EgressProvider` | USB RNDIS via ipheth |
 | Egress — VPN | `EgressProvider` | Deferred (WireGuard planned) |
@@ -157,7 +156,8 @@ detonator/
     config.py                          # uvicorn entrypoint
     browser/
       base.py                          # BrowserModule ABC + DetonationRequest/Result + StealthProfile
-      playwright_chromium.py           # Playwright Chromium implementation
+      playwright_chromium.py           # Playwright/Patchright Chromium implementation (fallback)
+      camoufox_firefox.py             # Camoufox Firefox implementation (default)
       network_capture.py               # SHA-256 body sink + bodies/manifest.jsonl writer
       cdp_response_tap.py              # Per-page CDP Network listener for response bodies
       route_document_interceptor.py    # Main-frame document body capture via route()
