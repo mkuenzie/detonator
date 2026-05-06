@@ -76,6 +76,7 @@ class PlaywrightChromiumModule(BrowserModule):
                     "--no-first-run",
                     "--password-store=basic",
                     "--use-mock-keychain",
+                    f"--accept-lang={stealth.locale},{stealth.locale.split('-')[0]}",
                 ],
                 ignore_default_args=["--enable-automation", "--enable-logging"],
                 locale=stealth.locale,
@@ -173,6 +174,20 @@ class PlaywrightChromiumModule(BrowserModule):
                     )
                 except Exception:
                     logger.warning("Network idle timeout — proceeding with capture")
+
+            try:
+                fp = await self._page.evaluate("""() => ({
+                    webdriver: navigator.webdriver,
+                    plugins: navigator.plugins.length,
+                    plugin_names: [...navigator.plugins].map(p => p.name),
+                    languages: [...navigator.languages],
+                    hardware_concurrency: navigator.hardwareConcurrency,
+                    max_touch_points: navigator.maxTouchPoints,
+                    platform: navigator.platform,
+                })""")
+                logger.debug("Browser fingerprint: %s", fp)
+            except Exception as fp_exc:
+                logger.debug("Browser fingerprint eval failed: %s", fp_exc)
 
             if request.interactive:
                 logger.info("Interactive mode — pausing for analyst takeover")

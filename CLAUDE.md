@@ -2,6 +2,8 @@
 
 Interactive URL detonation framework for a home malware/phishing analysis lab. This file orients future Claude sessions. For the phase tracker, see [SPEC.md](SPEC.md). For user-facing setup, see [README.md](README.md).
 
+When running commands ensure you use the venv.
+
 ## What this project is
 
 - Analyst submits a URL → it detonates in a sandboxed VM → artifacts (HAR, response bodies, navigations, screenshots, DOM, console) are captured → the host enriches them (WHOIS/DNS/TLS/favicon/hosting/TLD) → navigations and the initiator graph are used to classify scope vs noise → Sigma rules match techniques → results are stored and queryable.
@@ -29,10 +31,11 @@ Analyst → Host Orchestrator (FastAPI)
             ├── EgressProvider    (direct / tether; VPN deferred)
             ├── AgentManager      (HTTP client for the in-VM agent)
             ├── Enrichment pipeline
-            │     ├── core/   (always run: navigations, dom)
+            │     ├── core/   (always run: navigations, resources)
             │     └── plugins/ (opt-in: whois, dns, tls, favicon, tld, hosting)
             ├── Analysis pipeline (Sigma rules → TechniqueHit)
             ├── Navigation-scope extractor + noise filter
+            ├── Transaction view-model (detonator/ui/transactions.py)
             └── Storage (SQLite metadata + filesystem CAS)
 
 In-VM Agent (FastAPI + Playwright Chromium, headed)
@@ -83,7 +86,7 @@ Relationship tables (`observable_links`, `run_observables`, `campaign_observable
 | Egress — direct | `EgressProvider` | Linux bridge + nftables |
 | Egress — tether | `EgressProvider` | USB RNDIS via ipheth |
 | Egress — VPN | `EgressProvider` | Deferred (WireGuard planned) |
-| Enrichment — core | `Enricher` | `NavigationEnricher`, `DomExtractor` |
+| Enrichment — core | `Enricher` | `NavigationEnricher`, `ResourceContentEnricher` |
 | Enrichment — WHOIS | `Enricher` | `asyncwhois` / raw RDAP |
 | Enrichment — DNS | `Enricher` | `dnspython` |
 | Enrichment — TLS | `Enricher` | `cryptography` / `ssl` stdlib |
@@ -129,7 +132,7 @@ detonator/
       base.py                          # Enricher ABC, RunContext, EnrichmentResult, observable_id()
       pipeline.py                      # EnrichmentPipeline, build_from_config()
       har.py                           # HAR → domains/IPs helper
-      core/                            # Always-run enrichers (navigations, dom)
+      core/                            # Always-run enrichers (navigations, resources)
       plugins/                         # Opt-in enrichers (whois, dns, tls, favicon, tld, hosting)
     analysis/
       navigation.py                    # parse_har, build_initiator_graph, extract_navigation_scope
@@ -143,7 +146,11 @@ detonator/
       manifest.py                      # build_manifest() consolidates run state → manifest.json
     ui/
       routes.py                        # UI + HTMX-partial handlers, mounted at /ui/
+      transactions.py                  # Transaction view-model (load_transactions, get_transaction, load_body_preview)
       templates/                       # Jinja2 pages + partials
+        tabs/                          # Per-tab partials for /ui/runs/{id}?tab=
+          overview.html / network.html / resources.html / enrichment.html / observables.html / techniques.html / timeline.html
+          transactions/                # _row_detail.html, _body_preview.html
       static/                          # Vendored htmx.min.js + pico.min.css + style.css
   agent/                               # In-VM agent (runs on the Windows sandbox)
     api.py                             # FastAPI REST API
